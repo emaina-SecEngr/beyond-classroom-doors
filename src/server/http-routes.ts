@@ -228,12 +228,26 @@ export function registerAuthAndIntegrationRoutes(app: Hono<AppContext>): void {
     }
   })
 
+    // SECURITY (verified 2026-09-30): this catch-all used to forward ANY catalog
+  // integration for ANY caller, attaching APP_OWNER_JWT for developer billing,
+  // so anonymous requests could spend owner credits on 215+ endpoints.
+  // Browser access is now allowlist-only and always requires sign-in.
+  // Email/LLM calls run only in server actions (GUARDRAILS.md §1.6), which call
+  // the api-worker directly (src/server/action-routes.ts), not this route.
+  // Adding an entry here requires review: it must also be rate-limited.
+  const BROWSER_INTEGRATIONS = new Set<string>([])
+
   app.all('/api/integrations/:name/:endpoint', async (c) => {
     const integrationName = c.req.param('name')
+    const endpointKey = `${integrationName}/${c.req.param('endpoint')}`
+    if (!BROWSER_INTEGRATIONS.has(endpointKey)) {
+      return c.json({ error: 'This integration is not available from the browser' }, 403)
+    }
+
     const billingMode = integrations[integrationName]?.billing ?? 'developer'
 
     const auth = await resolveAuth(c.req.raw, c.env)
-    if (!auth && billingMode === 'user') {
+    if (!auth) {
       return c.json({ error: 'Sign in required for this integration' }, 401)
     }
 
