@@ -1,0 +1,244 @@
+# .github/workflows/ci.yml
+# CI/CD for a DeepSpace app: secret scan -> static checks -> E2E tests -> gated deploy.
+#
+# Required GitHub setup (Settings -> Environments):
+#   Environment "ci-tests"    -> secrets: DEEPSPACE_SESSION, DEEPSPACE_TEST_ACCOUNTS
+#   Environment "production"  -> secret:  DEEPSPACE_SESSION
+#                                protection: required reviewer (you) + deploy only from "main"
+#
+# DEEPSPACE_SESSION       = contents of ~/.deepspace/session (after `npx deepspace auth login`)
+# DEEPSPACE_TEST_ACCOUNTS = contents of ~/.deepspace/test-accounts.json
+#                           (after `npx deepspace test accounts create ...`)
+#
+# WARNING: never run `npx deepspace auth logout` in CI. It revokes the session
+# server-side, which also logs out your own machine.
+#
+# Gate policy:
+#   BLOCKING  - secret scan, committed secret files, guardrail check (GUARDRAILS.md §1),
+#               type-check, unit tests, E2E tests, manual approval before deploy
+#   WARN ONLY - ESLint, npm audit, anti-AI design gate
+#               (ratchet to blocking once the baseline is clean)
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ---------------------------------------------------------------
+  # 1. Secret scan - no credentials needed, runs on every change
+  # ---------------------------------------------------------------
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan history for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fail if local secret files are tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.dev\.vars|(^|/)\.deepspace/|(^|/)\.claude/launch\.json$'; then
+            echo "::error::A local secrets file is committed. Remove it and rotate its values."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------
+  # 2. Static checks - lint, types, unit tests (no credentials)
+  # ---------------------------------------------------------------
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15 # DeepSpace supports 22.15+, 24, 26 (not 23/25)
+          cache: npm
+
+      - run: npm ci
+
+      # --- WARN MODE (check-engine lights) ---------------------------
+      # These report problems without failing the job, to protect
+      # development velocity. Ratchet plan: make both blocking once the
+      # baseline is clean (target: before the first school goes live).
+
+      - name: Lint (warn only)
+        run: |
+          if ! npx eslint .; then
+            echo "::warning title=Lint::ESLint reported problems. Not blocking yet - fix before they become blocking."
+          fi
+
+      - name: Dependency audit, high and critical (warn only)
+        run: |
+          if ! npm audit --audit-level=high; then
+            echo "::warning title=Dependency audit::High or critical vulnerabilities found. Review and upgrade where a fix exists."
+          fi
+
+      - name: Anti-AI design gate (warn only)
+        run: |
+          if ! bash scripts/design-gate.sh; then
+            echo "::warning title=Design gate::Landing page has design-rule violations. Fix before release."
+          fi
+
+      # --- BLOCKING (brakes) -----------------------------------------
+      # These fail the job. A security-rule violation, broken type or
+      # failing unit test means the change cannot ship.
+
+      - name: Guardrail check, security rules (blocking)
+        run: bash scripts/guardrail-check.sh
+
+      - name: Type-check (blocking)
+        run: npx tsc --noEmit
+
+      - name: Unit tests, Vitest (blocking)
+        run: npx vitest run
+
+  # ---------------------------------------------------------------
+  # 3. E2E tests - Playwright against the dev workers
+  #    Needs the session because `test run` regenerates .dev.vars.
+  #    Secrets are not exposed to fork PRs, so those skip this job.
+  # ---------------------------------------------------------------
+  e2e:
+    needs: [secret-scan, static]
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: ci-tests
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15
+          cache: npm
+
+      - run: npm ci
+
+      - name: Write DeepSpace credentials (mode 0600, never echoed)
+        env:
+          DEEPSPACE_SESSION: ${{ secrets.DEEPSPACE_SESSION }}
+          DEEPSPACE_TEST_ACCOUNTS: ${{ secrets.DEEPSPACE_TEST_ACCOUNTS }}
+        run: |
+          umask 077
+          mkdir -p ~/.deepspace
+          printf '%s' "$DEEPSPACE_SESSION" > ~/.deepspace/session
+          printf '%s' "$DEEPSPACE_TEST_ACCOUNTS" > ~/.deepspace/test-accounts.json
+
+      - name: Confirm identity
+        run: npx deepspace auth whoami
+
+      - name: Run all Playwright specs (smoke, api, collab)
+        run: npx deepspace test run e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Remove credentials from the runner
+        if: always()
+        run: rm -rf ~/.deepspace .dev.vars
+
+  # ---------------------------------------------------------------
+  # 4. Deploy - main only, after tests, behind a manual approval
+  # ---------------------------------------------------------------
+  deploy:
+    needs: [e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # deploy records the commit it ships
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15
+          cache: npm
+
+      - run: npm ci
+
+      - name: Write DeepSpace session (mode 0600)
+        env:
+          DEEPSPACE_SESSION: ${{ secrets.DEEPSPACE_SESSION }}
+        run: |
+          umask 077
+          mkdir -p ~/.deepspace
+          printf '%s' "$DEEPSPACE_SESSION" > ~/.deepspace/session
+
+      - name: Confirm platform plane (must be production)
+        run: |
+          npx deepspace status --json > "$RUNNER_TEMP/status.json"
+          env_plane=$(jq -r '.env // "unknown"' "$RUNNER_TEMP/status.json")
+          echo "Deploy plane: $env_plane"
+          if [ "$env_plane" != "production" ]; then
+            echo "::error title=Deploy::Refusing to deploy - plane is '$env_plane', expected 'production'."
+            exit 1
+          fi
+
+      - name: Deploy
+        run: |
+          # Exit codes: 0 done, 1 failure, 2 safe partial stop (e.g. release_in_progress).
+          # release_in_progress means another deploy is mid-release: retry, don't fail.
+          set +e
+          for attempt in 1 2 3; do
+            npx deepspace deploy --json > "$RUNNER_TEMP/deploy.json" 2> "$RUNNER_TEMP/deploy.log"
+            code=$?
+            if [ "$code" -eq 2 ] && grep -q '"release_in_progress"' "$RUNNER_TEMP/deploy.json"; then
+              echo "::warning title=Deploy::Another release in progress (attempt $attempt). Retrying in 30s."
+              sleep 30
+              continue
+            fi
+            break
+          done
+          set -e
+
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=Deploy::deploy exited $code"
+            cat "$RUNNER_TEMP/deploy.json"
+            tail -n 40 "$RUNNER_TEMP/deploy.log"
+            exit 1
+          fi
+
+          # GitHub-source deploys ship the working tree as-is: never ship a dirty tree.
+          # (jq's `//` treats false as missing, so test for null explicitly.)
+          dirty=$(jq -r 'if .dirty == null then "null" else (.dirty | tostring) end' "$RUNNER_TEMP/deploy.json")
+          if [ "$dirty" = "true" ]; then
+            echo "::error title=Deploy::Deploy shipped a dirty working tree. Investigate before trusting this release."
+            exit 1
+          fi
+
+          # 'unconfirmed' means the edge is still rolling out: warn, don't fail.
+          serving=$(jq -r '.serving // "unknown"' "$RUNNER_TEMP/deploy.json")
+          if [ "$serving" != "confirmed" ]; then
+            echo "::warning title=Deploy::serving=$serving - rollout may still be propagating. Re-check the live URL."
+          fi
+          echo "Deployed: serving=$serving dirty=$dirty"
+
+      - name: Remove credentials from the runner
+        if: always()
+        run: rm -rf ~/.deepspace
