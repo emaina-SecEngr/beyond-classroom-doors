@@ -226,6 +226,9 @@ Extend the scaffold's three specs; don't add parallel suites.
 13. Audit entries cannot be updated or deleted by anyone.
 14. Live app: `/api/debug/*` does not answer; the integration proxy cannot be used as an
     open email relay (signed out and as a plain member).
+15. A withdrawn session can be reclaimed, by exactly one new volunteer.
+16. Only the claimant can confirm, withdraw or request a change; self-withdrawal is
+    refused inside 48 hours (server time).
 
 ---
 
