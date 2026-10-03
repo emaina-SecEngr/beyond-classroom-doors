@@ -36,6 +36,7 @@ import {
   topicText,
 } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
+import { useSchools } from '../../../lib/schools'
 import { sessionStartSeconds } from '../../../lib/time'
 import { SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
@@ -54,6 +55,7 @@ interface SessionRow {
   timeBand: TimeBand
   expectedHeadcount: number | null
   status: SessionStatus
+  schoolId?: string
 }
 interface DetailsRow {
   sessionId: string
@@ -80,6 +82,7 @@ export default function MySessionsPage() {
   const claims = useQuery<ClaimRow>('claims', { where: { volunteerId: me.userId ?? '__none__' }, limit: 200 })
   const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
   const details = useQuery<DetailsRow>('session_details', { limit: 200 })
+  const { byId: schoolById } = useSchools()
   const [pending, setPending] = useState<Pending>(null)
   const [busy, setBusy] = useState(false)
   const [changeKind, setChangeKind] = useState<'cancel' | 'reschedule'>('reschedule')
@@ -168,6 +171,10 @@ export default function MySessionsPage() {
                     </div>
 
                     <dl className="mt-4 space-y-1.5">
+                      {(() => {
+                        const sc = schoolById.get(b.session!.schoolId ?? '')
+                        return sc ? <Fact label="School">{[sc.name, sc.address, sc.city].filter(Boolean).join(', ')}</Fact> : null
+                      })()}
                       <Fact label="Room">{b.details?.room || 'Not set yet — the teacher or program staff will add it'}</Fact>
                       {b.details?.arrivalNote && <Fact label="On arrival">{b.details.arrivalNote}</Fact>}
                       {b.details?.teacherNote && <Fact label="From the teacher">{b.details.teacherNote}</Fact>}

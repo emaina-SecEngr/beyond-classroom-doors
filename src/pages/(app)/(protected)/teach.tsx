@@ -37,6 +37,7 @@ import {
   TOPIC_LABELS,
 } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
+import { useSchools } from '../../../lib/schools'
 import { GRADES, TIME_BANDS, TOPICS, type SessionStatus, type TimeBand, type Topic } from '../../../schemas/shared'
 
 interface SessionRow {
@@ -81,6 +82,7 @@ export default function TeachPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<EditableDetails | null>(null)
+  const { byId: schoolById } = useSchools()
 
   if (!me.ready) return <Loading />
   if (me.appRole !== 'teacher') {
@@ -91,6 +93,7 @@ export default function TeachPage() {
     )
   }
 
+  const mySchool = me.schoolId ? schoolById.get(me.schoolId) : undefined
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }))
 
   async function submit(e: FormEvent) {
@@ -132,7 +135,19 @@ export default function TeachPage() {
   const earlier = rows.filter((r) => !upcoming.includes(r))
 
   return (
-    <Page title="Teacher desk" intro="Ask for a one-hour career session. Approved volunteers see it on the board and one of them claims it.">
+    <Page
+      title="Teacher desk"
+      intro={
+        mySchool
+          ? `${mySchool.name}${mySchool.city ? `, ${mySchool.city}` : ''}. Ask for a one-hour career session; approved volunteers see it on the board and one of them claims it.`
+          : 'Ask for a one-hour career session. Approved volunteers see it on the board and one of them claims it.'
+      }
+    >
+      {!mySchool && (
+        <p role="note" className="mb-6 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+          Your school isn’t set yet, so you can’t post requests. Ask program staff to add your school to your teacher access.
+        </p>
+      )}
       <Section title="Your requests">
         {mine.status === 'loading' && <Loading />}
         {mine.status === 'error' && <ErrorNote message={mine.error || 'Could not load your requests.'} />}

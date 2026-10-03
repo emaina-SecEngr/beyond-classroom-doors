@@ -3,6 +3,7 @@
  *
  *   Waiting      applications to approve (final) or reject
  *   Approved     read-only roster of approved volunteers
+ *   Schools      the district's schools taking volunteers (D9)
  *   Delegate     hand approvals to a staff member for a set time; add/remove staff
  *   Decisions    every approval, rejection and delegation, from the audit log
  *
@@ -18,13 +19,14 @@ import { EmptyState, Tabs, TabsContent, TabsList, TabsTrigger } from '@/componen
 import { ErrorNote, Loading, Page } from '../../../components/Page'
 import { ApprovedVolunteers } from '../../../components/admin/ApprovedVolunteers'
 import { AuditLog } from '../../../components/admin/AuditLog'
+import { Schools } from '../../../components/admin/Schools'
 import { ReviewQueue } from '../../../components/admin/ReviewQueue'
 import { ProgramStaff } from '../../../components/admin/StaffAccess'
 import { markAdminLanded, useAccess, type Access, type StatusRow } from '../../../components/admin/shared'
 import { formatInstant } from '../../../lib/labels'
 import { useMe, type ProfileRow } from '../../../lib/me'
 
-const DECISION_ACTIONS = ['approve', 'reject', 'vet', 'grant_vetting_help', 'end_vetting_help', 'grant_staff', 'remove_staff', 'staff_change_refused']
+const DECISION_ACTIONS = ['approve', 'reject', 'vet', 'grant_vetting_help', 'end_vetting_help', 'grant_staff', 'remove_staff', 'staff_change_refused', 'create_school', 'update_school']
 
 export default function ApprovalsPage() {
   const me = useMe()
@@ -87,6 +89,7 @@ function ApprovalsDesk({ access }: { access: Access }) {
           <TabsList className="flex-wrap">
             <TabsTrigger value="waiting">Waiting{queue.length ? ` (${queue.length})` : ''}</TabsTrigger>
             <TabsTrigger value="approved">Approved{approvedCount ? ` (${approvedCount})` : ''}</TabsTrigger>
+            <TabsTrigger value="schools">Schools</TabsTrigger>
             <TabsTrigger value="delegate">Delegate &amp; staff</TabsTrigger>
             <TabsTrigger value="decisions">Decisions</TabsTrigger>
           </TabsList>
@@ -95,6 +98,9 @@ function ApprovalsDesk({ access }: { access: Access }) {
           </TabsContent>
           <TabsContent value="approved" className="pt-6">
             <ApprovedVolunteers nameOf={nameOf} />
+          </TabsContent>
+          <TabsContent value="schools" className="pt-6">
+            <Schools editable />
           </TabsContent>
           <TabsContent value="delegate" className="pt-6">
             <ProgramStaff access={access} />

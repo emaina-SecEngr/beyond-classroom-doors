@@ -58,6 +58,13 @@ interface Profile extends Record<string, unknown> {
   profession: string
   employer: string
 }
+interface School extends Record<string, unknown> {
+  name: string
+  district: string
+  city: string
+  address: string
+  active: boolean | number
+}
 interface SessionRequest extends Record<string, unknown> {
   teacherId: string
   grade: string
@@ -67,6 +74,7 @@ interface SessionRequest extends Record<string, unknown> {
   timeBand: TimeBand
   expectedHeadcount: number | null
   status: SessionStatus
+  schoolId?: string
 }
 interface SessionDetails extends Record<string, unknown> {
   sessionId: string
@@ -167,6 +175,51 @@ export const actions: Record<string, ActionHandler<Env>> = {
       return ok({ status: status.status })
     }),
 
+  // ── D9 · Schools in the district — the program admin manages them ─────────
+  createSchool: ({ userId, params, tools, env }) =>
+    run('createSchool', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const data = {
+        name: str(params, 'name', { required: true, max: 80 }),
+        district: str(params, 'district', { max: 80 }),
+        city: str(params, 'city', { max: 60 }),
+        address: str(params, 'address', { max: 160 }),
+        active: true,
+        createdByUser: userId,
+      }
+      const created = await tools.create('schools', data)
+      if (!created.success) refuse(`A school called “${data.name}” already exists.`, 'duplicate')
+      const schoolId = (created as { data: { recordId: string } }).data.recordId
+      await audit(tools, { actorId: userId, action: 'create_school', targetType: 'school', targetId: schoolId, toState: data.name })
+      return ok({ schoolId })
+    }),
+
+  updateSchool: ({ userId, params, tools, env }) =>
+    run('updateSchool', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const schoolId = str(params, 'schoolId', { required: true, max: 100 })
+      const before = await getData<School>(tools, 'schools', schoolId)
+      if (!before) refuse('School not found.', 'not_found')
+      const next = {
+        name: str(params, 'name', { required: true, max: 80 }),
+        district: str(params, 'district', { max: 80 }),
+        city: str(params, 'city', { max: 60 }),
+        address: str(params, 'address', { max: 160 }),
+        active: params.active === undefined ? !!before!.active : bool(params, 'active'),
+      }
+      const r = await tools.update('schools', schoolId, next)
+      if (!r.success) refuse(`A school called “${next.name}” already exists.`, 'duplicate')
+      await audit(tools, {
+        actorId: userId,
+        action: 'update_school',
+        targetType: 'school',
+        targetId: schoolId,
+        fromState: `${before!.name}${before!.active ? '' : ' (inactive)'}`,
+        toState: `${next.name}${next.active ? '' : ' (inactive)'}`,
+      })
+      return ok({ schoolId })
+    }),
+
   // ── M4 · Staff assign app roles (teacher) ─────────────────────────────────
   assignRole: ({ userId, params, tools, env }) =>
     run('assignRole', async () => {
@@ -175,11 +228,23 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const role = oneOf(params, 'role', APP_ROLES)
       const target = await getData(tools, 'users', targetId)
       if (!target) refuse('That user has not signed in yet.', 'not_found')
-      const previous = await appRoleOf(tools, targetId)
-      await must(tools.create('role_assignments', { userId: targetId, role, assignedBy: userId }, targetId), 'assign role')
-      await audit(tools, { actorId: userId, action: 'assign_role', targetType: 'user', targetId, fromState: previous ?? 'none', toState: role })
-      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: 'You now have teacher access.' })
-      return ok({ userId: targetId, role })
+      // D9: every teacher belongs to one active school.
+      const schoolId = str(params, 'schoolId', { required: true, max: 100 })
+      const school = await getData<School>(tools, 'schools', schoolId)
+      if (!school) refuse('Choose a school for this teacher.', 'invalid_input')
+      if (!school!.active) refuse(`${school!.name} is inactive. Reactivate it first.`, 'invalid_input')
+      const previous = await getData<{ role?: string; schoolId?: string }>(tools, 'role_assignments', targetId)
+      await must(tools.create('role_assignments', { userId: targetId, role, assignedBy: userId, schoolId }, targetId), 'assign role')
+      await audit(tools, {
+        actorId: userId,
+        action: 'assign_role',
+        targetType: 'user',
+        targetId,
+        fromState: previous ? `${previous.role ?? ''}${previous.schoolId ? `@${previous.schoolId}` : ''}` : 'none',
+        toState: `${role}@${schoolId}`,
+      })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You now have teacher access at ${school!.name}.` })
+      return ok({ userId: targetId, role, schoolId })
     }),
 
   removeRole: ({ userId, params, tools, env }) =>
@@ -249,6 +314,11 @@ export const actions: Record<string, ActionHandler<Env>> = {
   createSessionRequest: ({ userId, params, tools }) =>
     run('createSessionRequest', async () => {
       await requireAppRole(tools, userId, 'teacher')
+      // D9: the session is at the teacher's school — taken from their assignment, never from params.
+      const assignment = await getData<{ schoolId?: string }>(tools, 'role_assignments', userId)
+      const school = assignment?.schoolId ? await getData<School>(tools, 'schools', assignment.schoolId) : null
+      if (!school) refuse('Your school isn’t set yet. Ask program staff to add it to your teacher access.', 'no_school')
+      if (!school!.active) refuse(`${school!.name} isn’t taking new sessions right now.`, 'school_inactive')
       const grade = oneOf(params, 'grade', GRADES)
       const topic = oneOf(params, 'topic', TOPICS)
       const topicOther = topic === 'other' ? str(params, 'topicOther', { required: true, max: 60 }) : ''
@@ -268,6 +338,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
           timeBand,
           expectedHeadcount: int(params, 'expectedHeadcount', { min: 1, max: 200 }),
           status: 'open',
+          schoolId: assignment!.schoolId,
         }),
         'create request',
       )
@@ -365,12 +436,14 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const profile = await getData<Profile>(tools, 'profiles', userId)
       const label = `Grade ${session!.grade} · ${topicLabel(session!)}`
       const when = `${formatDate(session!.sessionDate)}, ${details?.startTime || session!.timeBand}`
+      const school = session!.schoolId ? await getData<School>(tools, 'schools', session!.schoolId) : null
+      const place = [school?.name, school?.address, details?.room ? `Room ${details.room}` : ''].filter(Boolean).join(', ')
       await notify(tools, {
         recipientId: userId,
         kind: 'claim_confirmed',
-        title: `You’re booked: ${label}`,
-        body: [when, details?.room ? `Room ${details.room}` : '', details?.arrivalNote ?? ''].filter(Boolean).join(' · '),
-        link: calendarLink({ title: `Career session: ${label}`, startSeconds: start, location: details?.room ? `Room ${details.room}` : undefined }),
+        title: `You’re booked: ${label}${school ? ` at ${school.name}` : ''}`,
+        body: [when, place, details?.arrivalNote ?? ''].filter(Boolean).join(' · '),
+        link: calendarLink({ title: `Career session: ${label}`, startSeconds: start, location: place || undefined }),
       })
       await notify(tools, {
         recipientId: session!.teacherId,

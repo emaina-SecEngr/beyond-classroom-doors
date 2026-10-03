@@ -13,12 +13,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { AuthOverlay, useQuery } from 'deepspace'
-import { Badge, Button, ConfirmModal, EmptyState, useToast } from '@/components/ui'
+import { Badge, Button, ConfirmModal, EmptyState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useToast } from '@/components/ui'
 import { ErrorNote, Loading, Page } from '../../components/Page'
 import { callAction } from '../../lib/actions'
 import { formatSessionDate, TIME_BAND_SHORT, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import { useMe, type Me } from '../../lib/me'
 import { ADMIN_LANDED_KEY, useAccess } from '../../components/admin/shared'
+import { useSchools } from '../../lib/schools'
 import type { TimeBand } from '../../schemas/shared'
 
 interface SessionRow {
@@ -30,6 +31,7 @@ interface SessionRow {
   timeBand: TimeBand
   expectedHeadcount: number | null
   status: string
+  schoolId?: string
 }
 
 interface BoardItem {
@@ -40,6 +42,7 @@ interface BoardItem {
   sessionDate: number
   timeBand: TimeBand
   expectedHeadcount: number | null
+  schoolName?: string
 }
 
 export default function HomePage() {
@@ -74,9 +77,9 @@ const SAMPLE_DAY = 86400
 function sampleBoard(): BoardItem[] {
   const base = todaySeconds() + 7 * SAMPLE_DAY
   return [
-    { id: 's1', grade: '11', topic: 'healthcare', sessionDate: base, timeBand: 'morning', expectedHeadcount: 32 },
-    { id: 's2', grade: '9', topic: 'skilled-trades', sessionDate: base + SAMPLE_DAY, timeBand: 'midday', expectedHeadcount: 28 },
-    { id: 's3', grade: '12', topic: 'technology', sessionDate: base + 3 * SAMPLE_DAY, timeBand: 'afternoon', expectedHeadcount: 35 },
+    { id: 's1', grade: '11', topic: 'healthcare', sessionDate: base, timeBand: 'morning', expectedHeadcount: 32, schoolName: 'Example High' },
+    { id: 's2', grade: '9', topic: 'skilled-trades', sessionDate: base + SAMPLE_DAY, timeBand: 'midday', expectedHeadcount: 28, schoolName: 'Example High' },
+    { id: 's3', grade: '12', topic: 'technology', sessionDate: base + 3 * SAMPLE_DAY, timeBand: 'afternoon', expectedHeadcount: 35, schoolName: 'Sample Academy' },
   ]
 }
 
@@ -110,11 +113,15 @@ function LiveBoard({ me }: { me: Me }) {
   })
   const [pending, setPending] = useState<BoardItem | null>(null)
   const [busy, setBusy] = useState(false)
+  const { schools, byId: schoolById } = useSchools()
+  const [schoolFilter, setSchoolFilter] = useState('__all__')
 
   const today = todaySeconds()
-  const items: BoardItem[] = records
-    .filter((r) => r.data.sessionDate >= today)
-    .map((r) => ({ id: r.recordId, ...r.data }))
+  const upcoming = records.filter((r) => r.data.sessionDate >= today)
+  const schoolsOnBoard = schools.filter((sc) => upcoming.some((r) => r.data.schoolId === sc.id))
+  const items: BoardItem[] = upcoming
+    .filter((r) => schoolFilter === '__all__' || r.data.schoolId === schoolFilter)
+    .map((r) => ({ id: r.recordId, ...r.data, schoolName: schoolById.get(r.data.schoolId ?? '')?.name }))
 
   async function claim() {
     if (!pending) return
@@ -129,13 +136,33 @@ function LiveBoard({ me }: { me: Me }) {
   return (
     <Page
       title="Session board"
-      intro="Open one-hour career sessions at the school. Claim one and the teacher is told right away."
+      intro="Open one-hour career sessions at the district’s schools. Claim one and the teacher is told right away."
       actions={<DeskLinks me={me} />}
       wide
     >
       {me.isStaff && <StaffWaiting />}
       <StatusBanner me={me} />
 
+      {schoolsOnBoard.length > 1 && (
+        <div className="mb-4 flex items-center gap-3">
+          <label htmlFor="school-filter" className="text-sm text-muted-foreground">
+            School
+          </label>
+          <Select value={schoolFilter} onValueChange={(v) => setSchoolFilter(v || '__all__')}>
+            <SelectTrigger id="school-filter" className="w-60">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All schools</SelectItem>
+              {schoolsOnBoard.map((sc) => (
+                <SelectItem key={sc.id} value={sc.id}>
+                  {sc.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {status === 'loading' && <Loading label="Loading sessions…" />}
       {status === 'error' && <ErrorNote message={error || 'Could not load the board. Refresh to try again.'} />}
       {status === 'ready' && items.length === 0 && (
@@ -162,7 +189,11 @@ function LiveBoard({ me }: { me: Me }) {
         onClose={() => (busy ? undefined : setPending(null))}
         onConfirm={claim}
         title={pending ? `Claim Grade ${pending.grade} · ${topicText(pending.topic, pending.topicOther)}?` : 'Claim session?'}
-        description={pending ? `${formatSessionDate(pending.sessionDate)}, ${TIME_BAND_SHORT[pending.timeBand]}. You can withdraw yourself up to 48 hours before.` : undefined}
+        description={
+          pending
+            ? `${pending.schoolName ? `${pending.schoolName}, ` : ''}${formatSessionDate(pending.sessionDate)}, ${TIME_BAND_SHORT[pending.timeBand]}. You can withdraw yourself up to 48 hours before.`
+            : undefined
+        }
         confirmText="Claim session"
         variant="default"
         loading={busy}
@@ -274,7 +305,7 @@ function BoardList({ items, renderAction }: { items: BoardItem[]; renderAction: 
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium">{topicText(item.topic, item.topicOther)}</p>
             <p className="text-xs text-muted-foreground">
-              Grade {item.grade}
+              {item.schoolName ? `${item.schoolName} · ` : ''}Grade {item.grade}
               {item.expectedHeadcount ? ` · about ${item.expectedHeadcount} students` : ''}
             </p>
           </div>

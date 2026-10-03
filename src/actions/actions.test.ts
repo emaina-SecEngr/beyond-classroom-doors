@@ -81,6 +81,7 @@ function makeTools(db: Map<string, Map<string, Row>>, callerId: string): ActionT
 }
 
 let db: Map<string, Map<string, Row>>
+let SCHOOL: string
 const OWNER = 'u_owner'
 const call = (name: string, userId: string, params: Row = {}) =>
   actions[name]({ userId, params, tools: makeTools(db, userId), env: { OWNER_USER_ID: OWNER } as never, callerJwt: 'jwt' })
@@ -105,8 +106,11 @@ async function seed() {
   ] as const) {
     users.set(id, { email: `${id}@example.org`, name: id, role })
   }
-  expect((await call('assignRole', 'u_staff', { userId: 'u_teacher', role: 'teacher' })).success).toBe(true)
-  expect((await call('assignRole', 'u_staff', { userId: 'u_teacher2', role: 'teacher' })).success).toBe(true)
+  const school = await call('createSchool', OWNER, { name: 'Lincoln High', district: 'San Diego Unified', city: 'San Diego', address: '4777 Imperial Ave' })
+  expect(school.success).toBe(true)
+  SCHOOL = (school as { data: { schoolId: string } }).data.schoolId
+  expect((await call('assignRole', 'u_staff', { userId: 'u_teacher', role: 'teacher', schoolId: SCHOOL })).success).toBe(true)
+  expect((await call('assignRole', 'u_staff', { userId: 'u_teacher2', role: 'teacher', schoolId: SCHOOL })).success).toBe(true)
   for (const v of ['u_vol', 'u_vol2', 'u_applicant', 'u_expired']) {
     expect((await call('saveProfile', v, { displayName: v, profession: 'Nurse', employer: 'Hospital' })).success).toBe(true)
   }
@@ -129,13 +133,13 @@ beforeEach(async () => {
 
 describe('identity and roles', () => {
   it('a member cannot assign roles (only staff)', async () => {
-    const r = await call('assignRole', 'u_vol', { userId: 'u_vol', role: 'teacher' })
+    const r = await call('assignRole', 'u_vol', { userId: 'u_vol', role: 'teacher', schoolId: SCHOOL })
     expect(r).toMatchObject({ success: false, code: 'forbidden' })
     expect(row('role_assignments', 'u_vol')).toBeUndefined()
   })
   it('the app owner counts as staff even without an admin users row', async () => {
     db.get('users')!.set(OWNER, { role: 'member' })
-    expect((await call('assignRole', OWNER, { userId: 'u_vol2', role: 'teacher' })).success).toBe(true)
+    expect((await call('assignRole', OWNER, { userId: 'u_vol2', role: 'teacher', schoolId: SCHOOL })).success).toBe(true)
   })
   it('a role must be one of the app roles (the retired board seat is refused too)', async () => {
     expect(await call('assignRole', 'u_staff', { userId: 'u_vol', role: 'admin' })).toMatchObject({ success: false, code: 'invalid_input' })
@@ -240,7 +244,7 @@ describe('who vets, and vetting help (decision R7, standing test 18)', () => {
     expect(await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 31, reason: 'x' })).toMatchObject({ success: false, code: 'invalid_input' })
   })
   it('staff can assign teachers', async () => {
-    expect((await call('assignRole', 'u_staff', { userId: 'u_vol2', role: 'teacher' })).success).toBe(true)
+    expect((await call('assignRole', 'u_staff', { userId: 'u_vol2', role: 'teacher', schoolId: SCHOOL })).success).toBe(true)
   })
 })
 
@@ -268,6 +272,51 @@ describe('session readiness — editing room / time / arrival notes', () => {
     expect(await edit('u_teacher', { startTime: '9am' })).toMatchObject({ success: false, code: 'invalid_input' })
     await call('cancelSession', 'u_teacher', { sessionId: S })
     expect(await edit('u_teacher')).toMatchObject({ success: false, code: 'stale_state' })
+  })
+})
+
+describe('schools in the district (D9, standing test 19)', () => {
+  it('only the program admin can add or edit schools', async () => {
+    expect(await call('createSchool', 'u_staff', { name: 'Hoover High' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('createSchool', 'u_teacher', { name: 'Hoover High' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('updateSchool', 'u_staff', { schoolId: SCHOOL, name: 'Renamed' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(row('schools', SCHOOL)?.name).toBe('Lincoln High')
+    expect((await call('createSchool', OWNER, { name: 'Hoover High', city: 'San Diego' })).success).toBe(true)
+  })
+  it('school names are unique', async () => {
+    expect(await call('createSchool', OWNER, { name: 'Lincoln High' })).toMatchObject({ success: false, code: 'duplicate' })
+  })
+  it('a teacher must be assigned to an existing, active school', async () => {
+    expect(await call('assignRole', 'u_staff', { userId: 'u_vol2', role: 'teacher' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('assignRole', 'u_staff', { userId: 'u_vol2', role: 'teacher', schoolId: 'nope' })).toMatchObject({ success: false, code: 'invalid_input' })
+    await call('updateSchool', OWNER, { schoolId: SCHOOL, name: 'Lincoln High', active: false })
+    expect(await call('assignRole', 'u_staff', { userId: 'u_vol2', role: 'teacher', schoolId: SCHOOL })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+  it('a session takes the teacher’s school from the server, never from the request', async () => {
+    const other = await call('createSchool', OWNER, { name: 'Hoover High' })
+    const otherId = (other as { data: { schoolId: string } }).data.schoolId
+    const r = await call('createSessionRequest', 'u_teacher', {
+      grade: '10', topic: 'technology', sessionDate: futureDate(12), timeBand: 'midday', schoolId: otherId,
+    })
+    const id = (r as { data: { sessionId: string } }).data.sessionId
+    expect(row('session_requests', id)?.schoolId).toBe(SCHOOL)
+  })
+  it('a teacher without a school, or at an inactive school, cannot post', async () => {
+    db.get('role_assignments')!.set('u_teacher2', { userId: 'u_teacher2', role: 'teacher', assignedBy: OWNER })
+    const req = { grade: '10', topic: 'technology', sessionDate: futureDate(12), timeBand: 'midday' }
+    expect(await call('createSessionRequest', 'u_teacher2', req)).toMatchObject({ success: false, code: 'no_school' })
+    await call('updateSchool', OWNER, { schoolId: SCHOOL, name: 'Lincoln High', active: false })
+    expect(await call('createSessionRequest', 'u_teacher', req)).toMatchObject({ success: false, code: 'school_inactive' })
+  })
+  it('the booking notification names the school and its address', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    const n = rows('notifications').find((x) => x.recipientId === 'u_vol' && x.kind === 'claim_confirmed')
+    expect(n?.title).toContain('Lincoln High')
+    expect(n?.body).toContain('4777 Imperial Ave')
+  })
+  it('school changes are audited', async () => {
+    await call('updateSchool', OWNER, { schoolId: SCHOOL, name: 'Lincoln High School' })
+    expect(rows('audit_log').some((a) => a.action === 'update_school' && a.toState === 'Lincoln High School')).toBe(true)
   })
 })
 

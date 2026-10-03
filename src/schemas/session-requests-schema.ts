@@ -22,6 +22,8 @@ export const sessionRequestsSchema: CollectionSchema = {
     { name: 'timeBand', storage: 'text', interpretation: select(TIME_BANDS), required: true },
     { name: 'expectedHeadcount', storage: 'number', interpretation: 'plain' },
     { name: 'status', storage: 'text', interpretation: select(SESSION_STATUSES), required: true },
+    // Copied from the teacher's assignment by createSessionRequest (D9); never from the client.
+    { name: 'schoolId', storage: 'text', interpretation: 'plain', immutable: true },
   ],
   ownerField: 'teacherId',
   permissions: {

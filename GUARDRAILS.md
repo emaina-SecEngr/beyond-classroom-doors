@@ -240,6 +240,8 @@ Extend the scaffold's three specs; don't add parallel suites.
 18. Staff can decide on volunteers only during an active help request from the nonprofit
     admin (ended or expired help, or losing staff status, stops it); only the nonprofit
     admin grants help.
+19. Only the program admin creates or edits schools; a teacher needs an active school;
+    a session's school is taken from the teacher's assignment, never from the request.
 
 ---
 

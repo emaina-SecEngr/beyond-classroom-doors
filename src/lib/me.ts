@@ -30,6 +30,8 @@ export interface Me {
   name: string
   isStaff: boolean
   appRole: AppRole | null
+  /** The teacher's school (D9), if any. */
+  schoolId: string | null
   profile: ProfileRow | null
   volunteer: VolunteerStatusRow | null
   canClaim: boolean
@@ -40,7 +42,7 @@ export function useMe(): Me {
   // Each of these is readable only by its owner (or staff), so filtering by my id
   // returns at most one row. Signed out, we query a sentinel that matches nothing.
   const me = userId ?? '__signed_out__'
-  const roles = useQuery<{ userId: string; role: AppRole }>('role_assignments', { where: { userId: me }, limit: 1 })
+  const roles = useQuery<{ userId: string; role: AppRole; schoolId?: string }>('role_assignments', { where: { userId: me }, limit: 1 })
   const statuses = useQuery<VolunteerStatusRow>('volunteer_status', { where: { userId: me }, limit: 1 })
   const profiles = useQuery<ProfileRow>('profiles', { where: { userId: me }, limit: 1 })
 
@@ -56,6 +58,7 @@ export function useMe(): Me {
     name: profiles.records[0]?.data.displayName || user?.name || '',
     isStaff: user?.role === 'admin',
     appRole: roles.records[0]?.data.role ?? null,
+    schoolId: roles.records[0]?.data.schoolId ?? null,
     profile: profiles.records[0]?.data ?? null,
     volunteer,
     canClaim: volunteer?.status === 'approved' && clearanceOk,

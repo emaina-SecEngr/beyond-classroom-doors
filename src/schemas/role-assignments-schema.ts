@@ -15,6 +15,8 @@ export const roleAssignmentsSchema: CollectionSchema = {
     { name: 'userId', storage: 'text', interpretation: 'plain', required: true, immutable: true },
     { name: 'role', storage: 'text', interpretation: select(APP_ROLES), required: true },
     { name: 'assignedBy', storage: 'text', interpretation: 'plain', required: true },
+    // The school a teacher works at (D9). Set by assignRole; required for new teacher assignments.
+    { name: 'schoolId', storage: 'text', interpretation: 'plain' },
   ],
   uniqueOn: ['userId'],
   ownerField: 'userId',

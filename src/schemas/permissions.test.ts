@@ -138,3 +138,17 @@ describe('vetting_help (decision R7)', () => {
     expect(canRead(s, 'member', rec({ userId: STAFF }), VOL)).toBe(false)
   })
 })
+
+describe('schools (D9)', () => {
+  const s = S.schools
+  it('every signed-in member can read schools (names and addresses are public)', () => {
+    expect(canRead(s, 'member', rec({ name: 'Lincoln High' }), VOL)).toBe(true)
+  })
+  it('nobody writes schools directly — only the program admin, through actions', () => {
+    for (const role of ['member', 'admin'] as const) {
+      expect(canCreate(s, role)).toBe(false)
+      expect(canUpdate(s, role, rec({ name: 'x' }), STAFF)).toBe(false)
+      expect(canDelete(s, role, rec({ name: 'x' }), STAFF)).toBe(false)
+    }
+  })
+})

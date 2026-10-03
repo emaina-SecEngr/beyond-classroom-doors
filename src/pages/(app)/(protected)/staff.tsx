@@ -20,6 +20,11 @@ import {
   Button,
   ConfirmModal,
   EmptyState,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Tabs,
   TabsContent,
   TabsList,
@@ -45,6 +50,7 @@ import {
   VOLUNTEER_STATUS_LABELS,
 } from '../../../lib/labels'
 import { useMe, type ProfileRow } from '../../../lib/me'
+import { useSchools } from '../../../lib/schools'
 import { type AppRole, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
 interface ChangeRow {
@@ -138,18 +144,20 @@ function StaffDesk() {
 
 function Roles({ users }: { users: Person[] }) {
   const toast = useToast()
-  const roles = useQuery<{ userId: string; role: AppRole }>('role_assignments', { limit: 500 })
+  const roles = useQuery<{ userId: string; role: AppRole; schoolId?: string }>('role_assignments', { limit: 500 })
+  const { schools, byId: schoolById } = useSchools()
   const [removing, setRemoving] = useState<Person | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [pick, setPick] = useState<Record<string, string>>({})
 
-  const roleById = new Map<string, string>(roles.records.map((r) => [r.data.userId, r.data.role]))
+  const assignmentById = new Map(roles.records.map((r) => [r.data.userId, r.data]))
+  const activeSchools = schools.filter((s) => s.active)
 
-  async function assign(p: Person) {
-    const role: AppRole = 'teacher'
+  async function assign(p: Person, schoolId: string) {
     setBusyId(p.id)
-    const res = await callAction('assignRole', { userId: p.id, role })
+    const res = await callAction('assignRole', { userId: p.id, role: 'teacher', schoolId })
     setBusyId(null)
-    if (res.success) toast.success(`${p.name || p.email} is now a teacher`)
+    if (res.success) toast.success(`${p.name || p.email} teaches at ${schoolById.get(schoolId)?.name ?? 'the school'}`)
     else toast.error('Could not assign the role', res.error)
   }
 
@@ -169,11 +177,19 @@ function Roles({ users }: { users: Person[] }) {
   return (
     <>
       <p className="mb-4 text-sm text-muted-foreground">
-        Give teacher access to the school’s teachers. Volunteers need no role.
+        Give teachers access at their school. Their session requests show that school. Volunteers need no role.
       </p>
+      {activeSchools.length === 0 && (
+        <p className="mb-4 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+          No active schools yet. The program admin adds schools on the Approvals page, under Schools.
+        </p>
+      )}
       <ul className="divide-y divide-border rounded-md border border-border bg-card">
         {users.map((p) => {
-          const current = roleById.get(p.id)
+          const a = assignmentById.get(p.id)
+          const current = a?.role
+          const school = a?.schoolId ? schoolById.get(a.schoolId) : undefined
+          const chosen = pick[p.id] ?? ''
           return (
             <li key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
               <div className="min-w-0 flex-1">
@@ -181,12 +197,37 @@ function Roles({ users }: { users: Person[] }) {
                 <p className="truncate text-xs text-muted-foreground">{p.email}</p>
               </div>
               {p.platformRole === 'admin' && <Badge variant="secondary">Program staff</Badge>}
-              {current && <Badge variant="info">{roleLabel(current)}</Badge>}
-              <div className="flex items-center gap-2">
-                {current !== 'teacher' && (
-                  <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id}>
-                    Make teacher
-                  </Button>
+              {current && (
+                <Badge variant="info">
+                  {roleLabel(current)}
+                  {current === 'teacher' ? ` · ${school?.name ?? 'no school set'}` : ''}
+                </Badge>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {activeSchools.length > 0 && (
+                  <>
+                    <Select value={chosen} onValueChange={(v) => setPick((m) => ({ ...m, [p.id]: v }))}>
+                      <SelectTrigger className="w-52" aria-label={`School for ${p.name || p.email}`}>
+                        <SelectValue placeholder={current === 'teacher' ? 'Move to school…' : 'Choose a school'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeSchools.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void assign(p, chosen)}
+                      loading={busyId === p.id}
+                      disabled={!chosen || (current === 'teacher' && chosen === a?.schoolId)}
+                    >
+                      {current === 'teacher' ? 'Move' : 'Make teacher'}
+                    </Button>
+                  </>
                 )}
                 {current && (
                   <Button size="sm" variant="ghost" onClick={() => setRemoving(p)}>
@@ -202,8 +243,8 @@ function Roles({ users }: { users: Person[] }) {
         open={!!removing}
         onClose={() => busyId === null && setRemoving(null)}
         onConfirm={() => void remove()}
-        title={removing ? `Remove ${removing.name || removing.email}’s access?` : 'Remove access?'}
-        description="They keep their account but lose the teacher or school-administrator desk."
+        title={removing ? `Remove ${removing.name || removing.email}’s teacher access?` : 'Remove access?'}
+        description="They keep their account but lose the teacher desk. Sessions they already posted stay."
         confirmText="Remove access"
         loading={busyId !== null}
       />
@@ -222,6 +263,7 @@ interface SessionRow {
   timeBand: TimeBand
   expectedHeadcount: number | null
   status: SessionStatus
+  schoolId?: string
 }
 interface DetailsRow {
   sessionId: string
@@ -250,6 +292,7 @@ function missingFor(s: SessionRow, d: DetailsRow | undefined, claim: ClaimRow | 
 
 function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
   const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
+  const { byId: schoolById } = useSchools()
   const details = useQuery<DetailsRow>('session_details', { limit: 500 })
   const claims = useQuery<ClaimRow>('claims', { where: { status: 'active' }, limit: 500 })
   const [editing, setEditing] = useState<EditableDetails | null>(null)
@@ -285,7 +328,8 @@ function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
                 <div className="min-w-0">
                   <p className="font-medium">{label}</p>
                   <p className="text-sm text-muted-foreground">
-                    {formatSessionDate(r.data.sessionDate)}, {sessionTimeText(r.data.timeBand, d?.startTime)} · Teacher: {nameOf(r.data.teacherId)}
+                    {schoolById.get(r.data.schoolId ?? '')?.name ?? 'School not set'} · {formatSessionDate(r.data.sessionDate)},{' '}
+                    {sessionTimeText(r.data.timeBand, d?.startTime)} · Teacher: {nameOf(r.data.teacherId)}
                   </p>
                   <p className="text-sm text-muted-foreground">Volunteer: {claim ? nameOf(claim.volunteerId) : '—'}</p>
                 </div>
