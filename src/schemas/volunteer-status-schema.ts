@@ -6,7 +6,7 @@ import { STAFF_READ_ONLY, VOLUNTEER_STATUSES, select } from './shared'
  * Records the RESULT of off-app vetting only — no documents, no check results (D4).
  * Written only by server actions (vet / approve / reset), which check the current
  * status before every transition (stale-click protection) and write the audit log.
- * School admins are `member` to DeepSpace, so they see vetted volunteers through a
+ * Board members are `member` to DeepSpace, so they see vetted volunteers through a
  * server action, not through this read rule.
  */
 export const volunteerStatusSchema: CollectionSchema = {

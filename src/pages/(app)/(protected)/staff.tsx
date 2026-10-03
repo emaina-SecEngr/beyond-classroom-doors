@@ -10,7 +10,7 @@
  * Staff read these collections directly (admin read: true); every write is a
  * server action that re-checks staff status on the server.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useUsers } from 'deepspace'
 import {
   Badge,
@@ -60,7 +60,7 @@ interface ChangeRow {
   status: 'open' | 'resolved'
 }
 
-const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher', school_admin: 'School administrator' }
+const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher', board_member: 'Board approver' }
 
 export default function StaffPage() {
   const me = useMe()
@@ -78,7 +78,7 @@ export default function StaffPage() {
 function StaffDesk() {
   const statuses = useQuery<StatusRow>('volunteer_status', { limit: 500 })
   const profiles = useQuery<ProfileRow>('profiles', { limit: 500 })
-  const { users, usersLoaded } = useUsers()
+  const { users, usersLoaded, setRole } = useUsers()
 
   const profileById = new Map(profiles.records.map((r) => [r.data.userId, r.data]))
   const nameOf = (id: string) => profileById.get(id)?.displayName || users.find((u) => u.id === id)?.name || 'Unknown user'
@@ -125,7 +125,14 @@ function StaffDesk() {
         </TabsContent>
 
         <TabsContent value="roles" className="pt-6">
-          {!usersLoaded ? <Loading /> : <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />}
+          {!usersLoaded ? (
+            <Loading />
+          ) : (
+            <>
+              <ProgramStaff people={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} setRole={setRole} />
+              <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="changes" className="pt-6">
@@ -172,7 +179,7 @@ function Applicants({ queue }: { queue: Applicant[] }) {
       toast.error('That didn’t go through', res.error)
       return
     }
-    toast.success(outcome === 'vetted' ? 'Marked as vetted' : 'Application rejected', outcome === 'vetted' ? 'The school administrator gives the final approval.' : undefined)
+    toast.success(outcome === 'vetted' ? 'Marked as vetted' : 'Application rejected', outcome === 'vetted' ? 'A board member gives the final approval.' : undefined)
     setOpen(null)
     setForm(EMPTY_VET)
   }
@@ -212,7 +219,7 @@ function Applicants({ queue }: { queue: Applicant[] }) {
           <Modal.Title>Vet {name}</Modal.Title>
           <Modal.Description>
             {open?.profile?.profession}
-            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked; the school sees a summary.
+            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked; the board sees a summary.
           </Modal.Description>
         </Modal.Header>
         <Modal.Body>
@@ -256,6 +263,119 @@ function Applicants({ queue }: { queue: Applicant[] }) {
         </Modal.Footer>
       </Modal>
     </>
+  )
+}
+
+// ── Program staff (decision R6) ──────────────────────────────────────────────
+//
+// Only the nonprofit admin (the app's owner) can grant or remove staff. The page
+// asks the server who you are (myAccess) only to decide what to show; the worker
+// (AppRecordRoom + staff-guard.ts) refuses anyone else and audits every change.
+
+function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId: string, role: string) => void }) {
+  const toast = useToast()
+  const me = useMe()
+  const [isNonprofitAdmin, setIsNonprofitAdmin] = useState<boolean | null>(null)
+  const [confirming, setConfirming] = useState<{ person: Person; role: 'admin' | 'member' } | null>(null)
+  const [pending, setPending] = useState<{ id: string; role: 'admin' | 'member'; name: string; since: number } | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void callAction<{ nonprofitAdmin: boolean }>('myAccess').then((r) => {
+      if (live) setIsNonprofitAdmin(r.success && r.data.nonprofitAdmin)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // setRole is fire-and-forget over the realtime connection, so we confirm the change
+  // by watching the live user list, and report a failure if it doesn't land in time.
+  useEffect(() => {
+    if (!pending) return
+    const person = people.find((p) => p.id === pending.id)
+    if (person?.platformRole === pending.role) {
+      toast.success(pending.role === 'admin' ? `${pending.name} is now program staff` : `${pending.name} is no longer program staff`)
+      setPending(null)
+      return
+    }
+    const t = setTimeout(() => {
+      toast.error('The change didn’t go through', 'Refresh and try again.')
+      setPending(null)
+    }, 10000)
+    return () => clearTimeout(t)
+  }, [pending, people, toast])
+
+  if (isNonprofitAdmin === null) return null
+  if (!isNonprofitAdmin) {
+    return (
+      <p className="mb-6 rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
+        Only the nonprofit admin can add or remove program staff.
+      </p>
+    )
+  }
+
+  const others = people.filter((p) => p.id !== me.userId)
+
+  return (
+    <section className="mb-8">
+      <h3 className="font-semibold">Program staff</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Staff vet volunteers and manage roles. As the nonprofit admin, only you can add or remove them. Every change is in the audit log.
+      </p>
+      {others.length === 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground">No one else has signed in yet.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-border rounded-md border border-border bg-card">
+          {others.map((p) => {
+            const isStaff = p.platformRole === 'admin'
+            return (
+              <li key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{p.name || '—'}</p>
+                  <p className="truncate text-xs text-muted-foreground">{p.email}</p>
+                </div>
+                {isStaff && <Badge variant="secondary">Program staff</Badge>}
+                <Button
+                  size="sm"
+                  variant={isStaff ? 'ghost' : 'outline'}
+                  loading={pending?.id === p.id}
+                  disabled={!!pending}
+                  onClick={() => setConfirming({ person: p, role: isStaff ? 'member' : 'admin' })}
+                >
+                  {isStaff ? 'Remove staff' : 'Make staff'}
+                </Button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <ConfirmModal
+        open={!!confirming}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => {
+          if (!confirming) return
+          const { person, role } = confirming
+          setPending({ id: person.id, role, name: person.name || person.email, since: Date.now() })
+          setRole(person.id, role)
+          setConfirming(null)
+        }}
+        title={
+          confirming
+            ? confirming.role === 'admin'
+              ? `Make ${confirming.person.name || confirming.person.email} program staff?`
+              : `Remove ${confirming.person.name || confirming.person.email} from program staff?`
+            : 'Change staff access?'
+        }
+        description={
+          confirming?.role === 'admin'
+            ? 'They’ll be able to vet volunteers, assign teacher and board roles, and read the audit log. Staff can’t give board approval.'
+            : 'They’ll lose the staff desk immediately.'
+        }
+        confirmText={confirming?.role === 'admin' ? 'Make staff' : 'Remove staff'}
+        variant={confirming?.role === 'admin' ? 'default' : 'destructive'}
+      />
+    </section>
   )
 }
 
@@ -303,7 +423,7 @@ function Roles({ users }: { users: Person[] }) {
   return (
     <>
       <p className="mb-4 text-sm text-muted-foreground">
-        Give teacher access to the school’s teachers, and school-administrator access to the one person who approves volunteers. Volunteers need no role.
+        Give teacher access to the school’s teachers, and board-approver access to the board member(s) who approve volunteers. Board approvers can’t be program staff. Volunteers need no role.
       </p>
       <ul className="divide-y divide-border rounded-md border border-border bg-card">
         {users.map((p) => {
@@ -323,7 +443,7 @@ function Roles({ users }: { users: Person[] }) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="teacher">Teacher</SelectItem>
-                    <SelectItem value="school_admin">School administrator</SelectItem>
+                    <SelectItem value="board_member">Board approver</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id} disabled={!choice[p.id] || choice[p.id] === current}>

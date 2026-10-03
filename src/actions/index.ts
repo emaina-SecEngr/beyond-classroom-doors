@@ -89,6 +89,10 @@ async function activeClaimFor(tools: Parameters<ActionHandler>[0]['tools'], sess
 }
 
 export const actions: Record<string, ActionHandler<Env>> = {
+  // ── R6 · Is the caller the nonprofit admin? (display only — the worker enforces) ──
+  myAccess: ({ userId, env }) =>
+    run('myAccess', async () => ok({ nonprofitAdmin: !!env.OWNER_USER_ID && userId === env.OWNER_USER_ID })),
+
   // ── M1 · Volunteer profile / application ──────────────────────────────────
   saveProfile: ({ userId, params, tools }) =>
     run('saveProfile', async () => {
@@ -135,7 +139,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const previous = await appRoleOf(tools, targetId)
       await must(tools.create('role_assignments', { userId: targetId, role, assignedBy: userId }, targetId), 'assign role')
       await audit(tools, { actorId: userId, action: 'assign_role', targetType: 'user', targetId, fromState: previous ?? 'none', toState: role })
-      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You now have ${role === 'teacher' ? 'teacher' : 'school administrator'} access.` })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You now have ${role === 'teacher' ? 'teacher' : 'board approver'} access.` })
       return ok({ userId: targetId, role })
     }),
 
@@ -191,16 +195,16 @@ export const actions: Record<string, ActionHandler<Env>> = {
       await notify(tools, {
         recipientId: targetId,
         kind: 'status_changed',
-        title: outcome === 'vetted' ? 'Your vetting is complete. The school will review next.' : 'Your application was not approved.',
+        title: outcome === 'vetted' ? 'Your vetting is complete. The board reviews next.' : 'Your application was not approved.',
         body: outcome === 'rejected' ? reason : '',
       })
       return ok({ userId: targetId, status: outcome })
     }),
 
-  // ── M3 · School admin approves (second key) ───────────────────────────────
+  // ── M3 · A board member approves (second key, decision D3a) ───────────────
   listVettedVolunteers: ({ userId, tools }) =>
     run('listVettedVolunteers', async () => {
-      await requireAppRole(tools, userId, 'school_admin')
+      await requireAppRole(tools, userId, 'board_member')
       const r = await tools.query<Record<string, unknown>>('volunteer_status', { where: { status: 'vetted' }, limit: 100 })
       if (!r.success) refuse('Could not load volunteers.', 'internal_error')
       const out = []
@@ -222,16 +226,16 @@ export const actions: Record<string, ActionHandler<Env>> = {
 
   approveVolunteer: ({ userId, params, tools, env }) =>
     run('approveVolunteer', async () => {
-      await requireAppRole(tools, userId, 'school_admin')
-      // Separation of duties (M3-AC3): the staff key and the school key must be different people.
-      if (await isStaff(tools, userId, env.OWNER_USER_ID)) refuse('Staff cannot give the school approval.', 'forbidden')
+      await requireAppRole(tools, userId, 'board_member')
+      // Separation of duties (M3-AC3): the staff key and the board key must be different people.
+      if (await isStaff(tools, userId, env.OWNER_USER_ID)) refuse('Staff cannot give the board approval.', 'forbidden')
       const targetId = str(params, 'userId', { required: true, max: 100 })
       const outcome = oneOf(params, 'outcome', ['approved', 'declined'] as const)
       const reason = str(params, 'reason', { max: 500 })
 
       const current = await statusOf(tools, targetId)
       if (!current) refuse('No application found for that volunteer.', 'not_found')
-      if (current!.status !== 'vetted') refuse(`This volunteer is ${current!.status}, not awaiting school approval.`, 'stale_state')
+      if (current!.status !== 'vetted') refuse(`This volunteer is ${current!.status}, not awaiting board approval.`, 'stale_state')
       if (outcome === 'declined' && !reason) refuse('A reason is required to decline.', 'invalid_input')
       if (outcome === 'approved' && !((current!.clearanceExpiresAt ?? 0) > nowSeconds())) {
         refuse('This volunteer’s clearance has expired.', 'clearance_expired')
@@ -241,7 +245,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       await notify(tools, {
         recipientId: targetId,
         kind: 'status_changed',
-        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'The school did not approve your application.',
+        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'The board did not approve your application.',
         body: outcome === 'declined' ? reason : '',
       })
       return ok({ userId: targetId, status: outcome })

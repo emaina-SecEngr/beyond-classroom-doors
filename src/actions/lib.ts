@@ -142,7 +142,7 @@ export async function requireStaff(tools: ActionTools, userId: string, ownerUser
 
 export async function requireAppRole(tools: ActionTools, userId: string, role: AppRole): Promise<void> {
   if ((await appRoleOf(tools, userId)) !== role) {
-    refuse(role === 'teacher' ? 'Only teachers can do this.' : 'Only the school administrator can do this.', 'forbidden')
+    refuse(role === 'teacher' ? 'Only teachers can do this.' : 'Only a member of the nonprofit’s board can do this.', 'forbidden')
   }
 }
 

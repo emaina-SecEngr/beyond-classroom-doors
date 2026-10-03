@@ -87,7 +87,7 @@ on the user's behalf.
    `integration.post` for email or AI. The browser sends intent ("claim session X");
    the server decides recipients, content, and prompts.
 7. **Paid calls are bounded by design.** Confirmation emails and the AI brief run only
-   inside `claimSession` (one claim per session via `uniqueOn`). The school-admin
+   inside `claimSession` (one claim per session via `uniqueOn`). The board
    broadcast is capped at once per day (checked against the audit log).
 8. **Secrets:** never commit `.dev.vars`, `~/.deepspace/*`, or `.claude/launch.json`.
    Never log or return `callerJwt`/tokens. Never put tokens in URLs or `localStorage`.
@@ -111,6 +111,11 @@ on the user's behalf.
     environment detection.
 17. **Destructive actions are reversible-by-design:** cancel sessions with
     `status: 'cancelled'`; never hard-delete sessions, claims, or audit entries.
+18. **Only the nonprofit admin (app owner) changes who is staff** (decision R6).
+    DeepSpace's built-in set-role message lets any admin set any role, unaudited;
+    `AppRecordRoom.webSocketMessage` in `worker.ts` must keep checking it with
+    `decideSetRole` (src/server/staff-guard.ts). Never expose `useUsers().setRole`
+    outside the owner-only Program staff panel.
 
 ---
 
@@ -217,7 +222,7 @@ Extend the scaffold's three specs; don't add parallel suites.
 4. A forged `volunteerId` in the request body is ignored.
 5. A user cannot change their own role or status (UI **and** raw `clientBuild.put`).
 6. Teacher A cannot edit teacher B's request.
-7. A school admin cannot vet; staff cannot perform the school-admin approval.
+7. A board member cannot vet; staff cannot perform the board approval.
 8. A new sign-up's user directory contains only themselves.
 9. Action responses contain no emails or tokens.
 10. Members cannot trigger or pause cron tasks (`read_only`).
@@ -229,6 +234,9 @@ Extend the scaffold's three specs; don't add parallel suites.
 15. A withdrawn session can be reclaimed, by exactly one new volunteer.
 16. Only the claimant can confirm, withdraw or request a change; self-withdrawal is
     refused inside 48 hours (server time).
+17. Only the nonprofit admin can grant or remove staff; another staff member's
+    set-role message is refused and audited; the owner's own access can't be changed;
+    no role values other than admin/member.
 
 ---
 

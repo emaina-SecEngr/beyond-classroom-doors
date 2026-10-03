@@ -6,7 +6,7 @@
  * code the Durable Object uses — so a schema change that weakens any rule fails CI.
  * Also runs the SDK's schema lint.
  *
- * Roles: 'member' = every signed-in user (volunteer, teacher, school admin);
+ * Roles: 'member' = every signed-in user (volunteer, teacher, board member);
  * 'admin' = nonprofit staff; 'anonymous' = signed out (no rule → deny).
  * Teacher / school-admin privileges are NOT here: they are enforced inside server
  * actions (decision R3), and are covered by the api.spec.ts action tests.

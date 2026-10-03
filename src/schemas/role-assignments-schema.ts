@@ -2,7 +2,7 @@ import type { CollectionSchema } from 'deepspace/schema'
 import { APP_ROLES, STAFF_READ_ONLY, select } from './shared'
 
 /**
- * App roles (decision R3): teacher and school admin.
+ * App roles (decision R3): teacher and board member (the nonprofit board's volunteer approver).
  * DeepSpace's own roles are a fixed SDK enum (viewer/member/admin), so app roles live
  * here. Staff assign them only through the `assignRole` / `removeRole` server actions
  * (audited). Members can read their own row so the UI knows which dashboard to show —

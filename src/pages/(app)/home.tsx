@@ -4,7 +4,7 @@
  *
  * Signed out: a clearly labeled example board, with sign-in.
  * Signed in: the live board of open, upcoming sessions. Approved volunteers can
- * claim; everyone else sees why they can't yet. Teachers, school admins and staff
+ * claim; everyone else sees why they can't yet. Teachers, board members and staff
  * get a link to their desk.
  *
  * The board shows only what a request contains — grade, topic, date, time band,
@@ -65,7 +65,7 @@ function SignedOutBoard() {
   return (
     <Page
       title="Session board"
-      intro="Teachers post one-hour career sessions. Vetted, school-approved volunteers claim them. Sign in to see the live board."
+      intro="Teachers post one-hour career sessions. Vetted, board-approved volunteers claim them. Sign in to see the live board."
       actions={<Button onClick={() => setSignIn(true)}>Sign in</Button>}
     >
       <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Example — not real sessions</p>
@@ -152,7 +152,7 @@ function LiveBoard({ me }: { me: Me }) {
 function DeskLinks({ me }: { me: Me }) {
   const links: { to: string; label: string }[] = []
   if (me.appRole === 'teacher') links.push({ to: '/teach', label: 'Teacher desk' })
-  if (me.appRole === 'school_admin') links.push({ to: '/school', label: 'School approvals' })
+  if (me.appRole === 'board_member') links.push({ to: '/approvals', label: 'Board approvals' })
   if (me.isStaff) links.push({ to: '/staff', label: 'Staff desk' })
   if (!me.appRole && !me.isStaff) links.push({ to: '/my-sessions', label: 'My sessions' })
   return (
@@ -167,14 +167,14 @@ function DeskLinks({ me }: { me: Me }) {
 }
 
 function StatusBanner({ me }: { me: Me }) {
-  // Teachers, school admins and staff use the board to look, not to claim.
+  // Teachers, board members and staff use the board to look, not to claim.
   if (me.appRole || me.isStaff) return null
 
   let text: string
   let action: { to: string; label: string } | null = null
   const v = me.volunteer
   if (!v) {
-    text = 'Want to speak to a class? Tell us about your work. Program staff vet every volunteer, then the school approves.'
+    text = 'Want to speak to a class? Tell us about your work. Program staff vet every volunteer, then the nonprofit’s board approves.'
     action = { to: '/apply', label: 'Volunteer' }
   } else if (v.status === 'approved' && !me.canClaim) {
     text = 'Your clearance has expired, so you can’t claim new sessions. Contact the program team to renew.'

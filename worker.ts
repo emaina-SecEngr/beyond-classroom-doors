@@ -33,6 +33,7 @@ import {
   resolveAuth,
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
+import { decideSetRole, isSetRoleMessage } from './src/server/staff-guard.js'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -47,6 +48,75 @@ export const __DO_MANIFEST__ = [
 export class AppRecordRoom extends RecordRoom<Env> {
   constructor(state: DurableObjectState, env: Env) {
     super(state, env, schemas, { ownerUserId: env.OWNER_USER_ID })
+  }
+
+  /**
+   * Decision R6: only the nonprofit admin (the app owner) may make someone program
+   * staff or remove them. DeepSpace's own set-role handler lets ANY admin set ANY
+   * role with no audit trail, so its message is checked here first. Everything
+   * else passes straight through to DeepSpace.
+   */
+  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+    if (typeof message === 'string') {
+      let msg: unknown = null
+      try {
+        msg = JSON.parse(message)
+      } catch {
+        // Not JSON: DeepSpace reports the error itself.
+      }
+      if (isSetRoleMessage(msg)) {
+        const caller = ws.deserializeAttachment() as { userId?: string; role?: string } | null
+        const callerId = caller?.userId ?? ''
+        const decision = decideSetRole(callerId, this.env.OWNER_USER_ID, msg.payload)
+        if (!decision.allow) {
+          ws.send(JSON.stringify({ type: 'core.error', payload: { error: decision.error } }))
+          // Audit refusals from staff (the case that matters); non-admins are refused by
+          // DeepSpace anyway, and logging them would let anyone flood the audit log.
+          if (caller?.role === 'admin') {
+            await this.auditStaffChange(callerId, 'staff_change_refused', decision.targetId, '', '', decision.error)
+          }
+          return
+        }
+        const before = await this.roleOf(decision.targetId)
+        await super.webSocketMessage(ws, message)
+        const after = await this.roleOf(decision.targetId)
+        if (after === decision.role && before !== after) {
+          await this.auditStaffChange(callerId, decision.role === 'admin' ? 'grant_staff' : 'remove_staff', decision.targetId, before, after, '')
+        }
+        return
+      }
+    }
+    return super.webSocketMessage(ws, message)
+  }
+
+  /** Runs a record tool inside this room as the app (RBAC off), like server actions do. */
+  private async tool(userId: string, tool: string, params: Record<string, unknown>): Promise<{ success: boolean; data?: unknown }> {
+    const res = await this.fetch(
+      new Request('https://internal/api/tools/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': userId, 'X-App-Action': 'true' },
+        body: JSON.stringify({ tool, params }),
+      }),
+    )
+    return (await res.json()) as { success: boolean; data?: unknown }
+  }
+
+  private async roleOf(userId: string): Promise<string> {
+    if (!userId) return ''
+    const r = await this.tool(this.env.OWNER_USER_ID, 'records.get', { collection: 'users', recordId: userId })
+    const role = (r.data as { record?: { data?: { role?: unknown } } } | undefined)?.record?.data?.role
+    return r.success && typeof role === 'string' ? role : ''
+  }
+
+  private async auditStaffChange(actorId: string, action: string, targetId: string, fromState: string, toState: string, reason: string) {
+    try {
+      await this.tool(actorId || this.env.OWNER_USER_ID, 'records.create', {
+        collection: 'audit_log',
+        data: { actorId: actorId || 'unknown', action, targetType: 'user', targetId: targetId || 'unknown', fromState, toState, reason },
+      })
+    } catch (e) {
+      console.error(`[staff-guard] audit write failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 }
 

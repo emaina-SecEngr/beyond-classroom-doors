@@ -133,6 +133,19 @@ if [ -f "$HTTP_ROUTES" ] && grep -q "/api/integrations/:name/:endpoint" "$HTTP_R
   [ -n "$out" ] && report ADVISORY "§1.6" "Browser integration allowlist is non-empty — confirm each entry is reviewed and rate-limited" "$out"
 fi
 
+# ── §1.18 Only the nonprofit admin changes who is staff (decision R6) ──────
+# Regression guard: DeepSpace's set-role message lets any admin set any role.
+# worker.ts must keep intercepting it, and setRole stays in the staff page only.
+if [ -f worker.ts ]; then
+  if ! grep -qE "decideSetRole\(" worker.ts; then
+    report HARD "§1.18" "worker.ts no longer checks set-role messages (decideSetRole)" "worker.ts"
+  fi
+  if [ -d src/pages ]; then
+    out=$(grep -rnE --include='*.tsx' --include='*.ts' "setRole\b" src/pages src/components src/lib 2>/dev/null | grep -v "src/pages/(app)/(protected)/staff.tsx" || true)
+    [ -n "$out" ] && report HARD "§1.18" "setRole used outside the owner-only Program staff panel" "$out"
+  fi
+fi
+
 # ── Advisory: patterns that usually mean a guardrail was missed ─────────────
 check ADVISORY "§2 UI" "Browser dialog (use ConfirmModal / Modal / useToast)" \
   "window\.(confirm|alert|prompt)\(" -rnE "${CLIENT[@]}"

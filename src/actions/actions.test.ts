@@ -88,7 +88,7 @@ const row = (c: string, id: string) => db.get(c)?.get(id)
 const rows = (c: string) => [...(db.get(c)?.values() ?? [])]
 const futureDate = (days: number) => new Date(Date.now() + days * DAY * 1000).toISOString().slice(0, 10)
 
-/** Seed: staff, school admin, teacher, two approved volunteers, one applicant, one open session. */
+/** Seed: staff, board member, teacher, two approved volunteers, one applicant, one open session. */
 async function seed() {
   db = new Map()
   const users = db.set('users', new Map()).get('users')!
@@ -104,7 +104,7 @@ async function seed() {
   ] as const) {
     users.set(id, { email: `${id}@example.org`, name: id, role })
   }
-  expect((await call('assignRole', 'u_staff', { userId: 'u_sa', role: 'school_admin' })).success).toBe(true)
+  expect((await call('assignRole', 'u_staff', { userId: 'u_sa', role: 'board_member' })).success).toBe(true)
   expect((await call('assignRole', 'u_staff', { userId: 'u_teacher', role: 'teacher' })).success).toBe(true)
   expect((await call('assignRole', 'u_staff', { userId: 'u_teacher2', role: 'teacher' })).success).toBe(true)
   for (const v of ['u_vol', 'u_vol2', 'u_applicant', 'u_expired']) {
@@ -130,7 +130,7 @@ beforeEach(async () => {
 
 describe('identity and roles', () => {
   it('a member cannot assign roles (only staff)', async () => {
-    const r = await call('assignRole', 'u_vol', { userId: 'u_vol', role: 'school_admin' })
+    const r = await call('assignRole', 'u_vol', { userId: 'u_vol', role: 'board_member' })
     expect(r).toMatchObject({ success: false, code: 'forbidden' })
     expect(row('role_assignments', 'u_vol')).toBeUndefined()
   })
@@ -149,19 +149,19 @@ describe('two-key vetting (standing tests 7, 12)', () => {
     const r = await call('vetVolunteer', 'u_sa', { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(r).toMatchObject({ success: false, code: 'forbidden' })
   })
-  it('staff cannot give the school approval', async () => {
+  it('staff cannot give the board approval', async () => {
     db.get('users')!.set('u_new', { role: 'member' })
     await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
     await call('vetVolunteer', 'u_staff', { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', 'u_staff', { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
   })
-  it('staff who are also given the school-admin role still cannot approve', async () => {
-    await call('assignRole', 'u_staff', { userId: 'u_staff', role: 'school_admin' })
+  it('staff who are also given the board role still cannot approve', async () => {
+    await call('assignRole', 'u_staff', { userId: 'u_staff', role: 'board_member' })
     await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
     await call('vetVolunteer', 'u_staff', { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', 'u_staff', { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
   })
-  it('the school admin cannot approve someone who was never vetted (no skipping)', async () => {
+  it('a board member cannot approve someone who was never vetted (no skipping)', async () => {
     expect(await call('approveVolunteer', 'u_sa', { userId: 'u_applicant', outcome: 'approved' })).toMatchObject({ success: false, code: 'stale_state' })
   })
   it('a stale "vet" click after a rejection is refused', async () => {

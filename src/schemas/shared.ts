@@ -35,7 +35,7 @@ export const SESSION_STATUSES = ['open', 'claimed', 'confirmed', 'completed', 'c
 
 export const CLAIM_STATUSES = ['active', 'withdrawn'] as const
 
-export const APP_ROLES = ['teacher', 'school_admin'] as const
+export const APP_ROLES = ['teacher', 'board_member'] as const
 
 export const NOTIFICATION_KINDS = [
   'claim_confirmed',

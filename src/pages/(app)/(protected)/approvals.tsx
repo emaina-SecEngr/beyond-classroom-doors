@@ -1,10 +1,10 @@
 /**
- * School approvals — the second key (M3).
+ * Board approvals — the second key (M3, decision D3a).
  *
- * The school administrator sees a vetting SUMMARY of volunteers program staff
+ * A member of the nonprofit's board sees a vetting SUMMARY of volunteers program staff
  * have vetted (name, profession, employer, qualification, clearance date) —
  * never the raw records, never emails — and approves or declines. The list
- * comes from a server action because school admins can't read other people's
+ * comes from a server action because board members can't read other people's
  * volunteer records directly.
  */
 import { useCallback, useEffect, useState } from 'react'
@@ -23,7 +23,7 @@ interface Candidate {
   clearanceExpiresAt: number | null
 }
 
-export default function SchoolPage() {
+export default function ApprovalsPage() {
   const me = useMe()
   const toast = useToast()
   const [list, setList] = useState<Candidate[] | null>(null)
@@ -33,7 +33,7 @@ export default function SchoolPage() {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const isSchoolAdmin = me.ready && me.appRole === 'school_admin'
+  const isBoardMember = me.ready && me.appRole === 'board_member'
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -43,14 +43,14 @@ export default function SchoolPage() {
   }, [])
 
   useEffect(() => {
-    if (isSchoolAdmin) void load()
-  }, [isSchoolAdmin, load])
+    if (isBoardMember) void load()
+  }, [isBoardMember, load])
 
   if (!me.ready) return <Loading />
-  if (!isSchoolAdmin) {
+  if (!isBoardMember) {
     return (
-      <Page title="School approvals">
-        <EmptyState title="For the school administrator" description="Program staff give this access to the school’s designated administrator." />
+      <Page title="Board approvals">
+        <EmptyState title="For the nonprofit’s board" description="Program staff give this access to the board member(s) who approve volunteers." />
       </Page>
     )
   }
@@ -73,8 +73,8 @@ export default function SchoolPage() {
 
   return (
     <Page
-      title="School approvals"
-      intro="Program staff have confirmed each volunteer’s identity, license (where relevant) and school clearance. Your approval lets them claim sessions."
+      title="Board approvals"
+      intro="Program staff have confirmed each volunteer’s identity, license (where relevant) and school clearance. The board’s approval lets them claim sessions."
       actions={
         <Button variant="outline" size="sm" onClick={() => void load()}>
           Refresh
@@ -113,7 +113,7 @@ export default function SchoolPage() {
         onClose={() => !busy && setApproving(null)}
         onConfirm={() => approving && void decide(approving, 'approved')}
         title={approving ? `Approve ${approving.displayName}?` : 'Approve?'}
-        description="They’ll be able to claim sessions at your school until their clearance expires."
+        description="They’ll be able to claim sessions until their clearance expires."
         confirmText="Approve"
         variant="default"
         loading={busy}
