@@ -14,7 +14,7 @@ import { formatDay, PROGRAM_EMAIL, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABE
 import { useMe } from '../../../lib/me'
 
 const NEXT_STEP: Record<string, string> = {
-  applied: 'Program staff will confirm your identity, check any professional license, and record your school clearance (TB test and background check).',
+  applied: 'The nonprofit will confirm your identity, check any professional license, and record your school clearance (TB test and background check).',
   vetted: 'Vetting is done. The nonprofit’s board gives the final approval.',
   approved: 'You can claim sessions on the board.',
   rejected: 'Program staff did not approve this application.',
@@ -56,7 +56,7 @@ export default function ApplyPage() {
       toast.error('Could not save', res.error)
       return
     }
-    if (!status) toast.success('Application submitted', 'Program staff will review it.')
+    if (!status) toast.success('Application submitted', 'The nonprofit will review it.')
     else if (res.data.reset) toast.info('Profile saved', 'Your application goes back for review because your work details changed.')
     else toast.success('Profile saved')
   }

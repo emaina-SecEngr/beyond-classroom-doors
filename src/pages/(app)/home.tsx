@@ -174,7 +174,7 @@ function StatusBanner({ me }: { me: Me }) {
   let action: { to: string; label: string } | null = null
   const v = me.volunteer
   if (!v) {
-    text = 'Want to speak to a class? Tell us about your work. Program staff vet every volunteer, then the nonprofit’s board approves.'
+    text = 'Want to speak to a class? Tell us about your work. The nonprofit vets every volunteer, then its board approves.'
     action = { to: '/apply', label: 'Volunteer' }
   } else if (v.status === 'approved' && !me.canClaim) {
     text = 'Your clearance has expired, so you can’t claim new sessions. Contact the program team to renew.'

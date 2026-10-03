@@ -10,6 +10,7 @@ import { claimsSchema } from './schemas/claims-schema'
 import { notificationsSchema } from './schemas/notifications-schema'
 import { auditLogSchema } from './schemas/audit-log-schema'
 import { changeRequestsSchema } from './schemas/change-requests-schema'
+import { vettingHelpSchema } from './schemas/vetting-help-schema'
 
 /**
  * Every collection in the app. Baked in at deploy time; after first deploy, changes
@@ -27,4 +28,5 @@ export const schemas: CollectionSchema[] = [
   notificationsSchema,
   auditLogSchema,
   changeRequestsSchema,
+  vettingHelpSchema,
 ]

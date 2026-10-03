@@ -23,6 +23,7 @@ import {
   useToast,
 } from '@/components/ui'
 import { ErrorNote, Field, Loading, Page, Panel, Section } from '../../../components/Page'
+import { SessionDetailsModal, type EditableDetails } from '../../../components/SessionDetailsModal'
 import { callAction } from '../../../lib/actions'
 import {
   formatSessionDate,
@@ -52,6 +53,8 @@ interface DetailsRow {
   sessionId: string
   room: string
   startTime: string
+  arrivalNote: string
+  teacherNote: string
 }
 
 const EMPTY_FORM = {
@@ -77,6 +80,7 @@ export default function TeachPage() {
   const [cancelling, setCancelling] = useState<{ id: string; label: string } | null>(null)
   const [cancelReason, setCancelReason] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState<EditableDetails | null>(null)
 
   if (!me.ready) return <Loading />
   if (me.appRole !== 'teacher') {
@@ -149,6 +153,22 @@ export default function TeachPage() {
                     <p className="text-xs text-muted-foreground">{d?.room ? `Room ${d.room}` : 'No room set'}</p>
                   </div>
                   <Badge variant={SESSION_STATUS_BADGE[r.data.status]}>{SESSION_STATUS_LABELS[r.data.status]}</Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setEditing({
+                        sessionId: r.recordId,
+                        label: `${label}, ${formatSessionDate(r.data.sessionDate)}`,
+                        room: d?.room ?? '',
+                        startTime: d?.startTime ?? '',
+                        arrivalNote: d?.arrivalNote ?? '',
+                        teacherNote: d?.teacherNote ?? '',
+                      })
+                    }
+                  >
+                    Details
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => setCancelling({ id: r.recordId, label: `${label}, ${formatSessionDate(r.data.sessionDate)}` })}>
                     Cancel
                   </Button>
@@ -267,6 +287,8 @@ export default function TeachPage() {
           </ul>
         </Section>
       )}
+
+      <SessionDetailsModal details={editing} onClose={() => setEditing(null)} />
 
       <Modal open={!!cancelling} onClose={() => !busy && setCancelling(null)} size="sm">
         <Modal.Header>

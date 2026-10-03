@@ -88,11 +88,12 @@ const row = (c: string, id: string) => db.get(c)?.get(id)
 const rows = (c: string) => [...(db.get(c)?.values() ?? [])]
 const futureDate = (days: number) => new Date(Date.now() + days * DAY * 1000).toISOString().slice(0, 10)
 
-/** Seed: staff, board member, teacher, two approved volunteers, one applicant, one open session. */
+/** Seed: nonprofit admin (owner), staff, board member, teacher, two approved volunteers, one applicant, one open session. */
 async function seed() {
   db = new Map()
   const users = db.set('users', new Map()).get('users')!
   for (const [id, role] of [
+    [OWNER, 'admin'],
     ['u_staff', 'admin'],
     ['u_sa', 'member'],
     ['u_teacher', 'member'],
@@ -104,14 +105,14 @@ async function seed() {
   ] as const) {
     users.set(id, { email: `${id}@example.org`, name: id, role })
   }
-  expect((await call('assignRole', 'u_staff', { userId: 'u_sa', role: 'board_member' })).success).toBe(true)
+  expect((await call('assignRole', OWNER, { userId: 'u_sa', role: 'board_member' })).success).toBe(true)
   expect((await call('assignRole', 'u_staff', { userId: 'u_teacher', role: 'teacher' })).success).toBe(true)
   expect((await call('assignRole', 'u_staff', { userId: 'u_teacher2', role: 'teacher' })).success).toBe(true)
   for (const v of ['u_vol', 'u_vol2', 'u_applicant', 'u_expired']) {
     expect((await call('saveProfile', v, { displayName: v, profession: 'Nurse', employer: 'Hospital' })).success).toBe(true)
   }
   for (const v of ['u_vol', 'u_vol2', 'u_expired']) {
-    expect((await call('vetVolunteer', 'u_staff', { userId: v, outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(365) })).success).toBe(true)
+    expect((await call('vetVolunteer', OWNER, { userId: v, outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(365) })).success).toBe(true)
     expect((await call('approveVolunteer', 'u_sa', { userId: v, outcome: 'approved' })).success).toBe(true)
   }
   // Simulate a clearance that lapsed after approval (cron never ran).
@@ -152,26 +153,32 @@ describe('two-key vetting (standing tests 7, 12)', () => {
   it('staff cannot give the board approval', async () => {
     db.get('users')!.set('u_new', { role: 'member' })
     await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
-    await call('vetVolunteer', 'u_staff', { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
+    await call('vetVolunteer', OWNER, { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', 'u_staff', { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
   })
-  it('staff who are also given the board role still cannot approve', async () => {
-    await call('assignRole', 'u_staff', { userId: 'u_staff', role: 'board_member' })
+  it('the nonprofit admin who vetted cannot also give the board approval', async () => {
+    await call('assignRole', OWNER, { userId: OWNER, role: 'board_member' })
     await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
-    await call('vetVolunteer', 'u_staff', { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
+    await call('vetVolunteer', OWNER, { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
+    expect(await call('approveVolunteer', OWNER, { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
+  })
+  it('staff who are also given the board role still cannot approve', async () => {
+    await call('assignRole', OWNER, { userId: 'u_staff', role: 'board_member' })
+    await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
+    await call('vetVolunteer', OWNER, { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', 'u_staff', { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
   })
   it('a board member cannot approve someone who was never vetted (no skipping)', async () => {
     expect(await call('approveVolunteer', 'u_sa', { userId: 'u_applicant', outcome: 'approved' })).toMatchObject({ success: false, code: 'stale_state' })
   })
   it('a stale "vet" click after a rejection is refused', async () => {
-    await call('vetVolunteer', 'u_staff', { userId: 'u_applicant', outcome: 'rejected', reason: 'Could not verify' })
-    const r = await call('vetVolunteer', 'u_staff', { userId: 'u_applicant', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
+    await call('vetVolunteer', OWNER, { userId: 'u_applicant', outcome: 'rejected', reason: 'Could not verify' })
+    const r = await call('vetVolunteer', OWNER, { userId: 'u_applicant', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(r).toMatchObject({ success: false, code: 'stale_state' })
     expect(row('volunteer_status', 'u_applicant')?.status).toBe('rejected')
   })
   it('rejecting requires a reason', async () => {
-    expect(await call('vetVolunteer', 'u_staff', { userId: 'u_applicant', outcome: 'rejected' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('vetVolunteer', OWNER, { userId: 'u_applicant', outcome: 'rejected' })).toMatchObject({ success: false, code: 'invalid_input' })
   })
   it('changing profession after approval sends the volunteer back to review', async () => {
     const r = await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Electrician', employer: 'Hospital' })
@@ -181,8 +188,84 @@ describe('two-key vetting (standing tests 7, 12)', () => {
   it('every decision is audited with the actor', async () => {
     const vet = rows('audit_log').filter((a) => a.action === 'vet')
     expect(vet.length).toBeGreaterThan(0)
-    expect(vet.every((a) => a.actorId === 'u_staff')).toBe(true)
+    expect(vet.every((a) => a.actorId === OWNER)).toBe(true)
     expect(rows('audit_log').filter((a) => a.action === 'approve').every((a) => a.actorId === 'u_sa')).toBe(true)
+  })
+})
+
+describe('who vets, and vetting help (decision R7, standing test 18)', () => {
+  const vet = (who: string, userId = 'u_applicant') =>
+    call('vetVolunteer', who, { userId, outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(200) })
+
+  it('staff cannot vet unless the nonprofit admin asked them to help', async () => {
+    expect(await vet('u_staff')).toMatchObject({ success: false, code: 'forbidden' })
+    expect(row('volunteer_status', 'u_applicant')?.status).toBe('applied')
+  })
+  it('the nonprofit admin can vet', async () => {
+    expect((await vet(OWNER)).success).toBe(true)
+  })
+  it('staff can vet while the admin’s help request is active', async () => {
+    expect((await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 7, reason: 'Admin travelling' })).success).toBe(true)
+    expect((await vet('u_staff')).success).toBe(true)
+    const entry = rows('audit_log').find((a) => a.action === 'grant_vetting_help')
+    expect(entry).toMatchObject({ actorId: OWNER, targetId: 'u_staff', reason: 'Admin travelling' })
+  })
+  it('help that has ended (or expired) no longer lets staff vet', async () => {
+    await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 7, reason: 'Admin travelling' })
+    expect((await call('endVettingHelp', OWNER, { userId: 'u_staff' })).success).toBe(true)
+    expect(await vet('u_staff')).toMatchObject({ success: false, code: 'forbidden' })
+    await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 1, reason: 'One day' })
+    db.get('vetting_help')!.get('u_staff')!.endsAt = Math.floor(Date.now() / 1000) - 1
+    expect(await vet('u_staff')).toMatchObject({ success: false, code: 'forbidden' })
+  })
+  it('help stops working if the person is no longer staff', async () => {
+    await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 7, reason: 'Admin travelling' })
+    db.get('users')!.get('u_staff')!.role = 'member'
+    expect(await vet('u_staff')).toMatchObject({ success: false, code: 'forbidden' })
+  })
+  it('only the nonprofit admin can ask for help — staff cannot grant it to themselves or others', async () => {
+    db.get('users')!.set('u_staff2', { role: 'admin' })
+    expect(await call('grantVettingHelp', 'u_staff', { userId: 'u_staff', days: 7, reason: 'x' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('grantVettingHelp', 'u_staff', { userId: 'u_staff2', days: 7, reason: 'x' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(row('vetting_help', 'u_staff')).toBeUndefined()
+  })
+  it('help goes only to staff, needs a reason, and is capped at 30 days', async () => {
+    expect(await call('grantVettingHelp', OWNER, { userId: 'u_vol', days: 7, reason: 'x' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 7 })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 31, reason: 'x' })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+  it('staff can assign teachers, but only the nonprofit admin can seat a board approver', async () => {
+    expect((await call('assignRole', 'u_staff', { userId: 'u_vol2', role: 'teacher' })).success).toBe(true)
+    expect(await call('assignRole', 'u_staff', { userId: 'u_vol', role: 'board_member' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('removeRole', 'u_staff', { userId: 'u_sa' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(row('role_assignments', 'u_sa')?.role).toBe('board_member')
+  })
+})
+
+describe('session readiness — editing room / time / arrival notes', () => {
+  const edit = (who: string, extra: Row = {}) => call('updateSessionDetails', who, { sessionId: S, room: '118', startTime: '10:00', arrivalNote: 'Front office', ...extra })
+  it('the owning teacher and staff can edit; another teacher and volunteers cannot', async () => {
+    expect((await edit('u_teacher')).success).toBe(true)
+    expect(row('session_details', S)?.room).toBe('118')
+    expect((await edit('u_staff', { room: '120' })).success).toBe(true)
+    expect(await edit('u_teacher2')).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await edit('u_vol')).toMatchObject({ success: false, code: 'forbidden' })
+    expect(row('session_details', S)?.room).toBe('120')
+  })
+  it('the booked volunteer is told about changes; nothing is sent when nothing changed', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    const before = rows('notifications').filter((n) => n.recipientId === 'u_vol').length
+    await edit('u_teacher')
+    const after = rows('notifications').filter((n) => n.recipientId === 'u_vol')
+    expect(after.length).toBe(before + 1)
+    expect(after.at(-1)?.body).toContain('Room 118')
+    await edit('u_teacher')
+    expect(rows('notifications').filter((n) => n.recipientId === 'u_vol').length).toBe(before + 1)
+  })
+  it('cancelled sessions cannot be edited, and bad times are refused', async () => {
+    expect(await edit('u_teacher', { startTime: '9am' })).toMatchObject({ success: false, code: 'invalid_input' })
+    await call('cancelSession', 'u_teacher', { sessionId: S })
+    expect(await edit('u_teacher')).toMatchObject({ success: false, code: 'stale_state' })
   })
 })
 

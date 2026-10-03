@@ -74,7 +74,7 @@ export default function ApprovalsPage() {
   return (
     <Page
       title="Board approvals"
-      intro="Program staff have confirmed each volunteer’s identity, license (where relevant) and school clearance. The board’s approval lets them claim sessions."
+      intro="The nonprofit has confirmed each volunteer’s identity, license (where relevant) and school clearance. The board’s approval lets them claim sessions."
       actions={
         <Button variant="outline" size="sm" onClick={() => void load()}>
           Refresh

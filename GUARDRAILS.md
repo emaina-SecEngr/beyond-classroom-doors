@@ -237,6 +237,9 @@ Extend the scaffold's three specs; don't add parallel suites.
 17. Only the nonprofit admin can grant or remove staff; another staff member's
     set-role message is refused and audited; the owner's own access can't be changed;
     no role values other than admin/member.
+18. Staff can vet only during an active help request from the nonprofit admin (ended
+    or expired help, or losing staff status, stops it); only the nonprofit admin grants
+    help or seats board approvers.
 
 ---
 

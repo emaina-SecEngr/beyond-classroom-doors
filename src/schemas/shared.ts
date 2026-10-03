@@ -53,6 +53,10 @@ export const CHANGE_REQUEST_STATUSES = ['open', 'resolved'] as const
 /** Self-service withdrawal is allowed only this far ahead of a session (SH6). */
 export const SELF_WITHDRAW_MIN_HOURS = 48
 
+/** Vetting help (R7): default and maximum length of a grant, in days. */
+export const VETTING_HELP_DEFAULT_DAYS = 14
+export const VETTING_HELP_MAX_DAYS = 30
+
 export type Grade = (typeof GRADES)[number]
 export type Topic = (typeof TOPICS)[number]
 export type TimeBand = (typeof TIME_BANDS)[number]

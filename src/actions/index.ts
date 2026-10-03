@@ -16,6 +16,8 @@ import {
   APP_ROLES,
   GRADES,
   SELF_WITHDRAW_MIN_HOURS,
+  VETTING_HELP_DEFAULT_DAYS,
+  VETTING_HELP_MAX_DAYS,
   TIME_BANDS,
   TOPICS,
   CHANGE_REQUEST_KINDS,
@@ -23,6 +25,7 @@ import {
   type SessionStatus,
 } from '../schemas/shared'
 import {
+  activeVettingHelp,
   appRoleOf,
   audit,
   bool,
@@ -31,6 +34,7 @@ import {
   formatDate,
   getData,
   int,
+  isNonprofitAdmin,
   isStaff,
   must,
   notify,
@@ -39,6 +43,8 @@ import {
   oneOf,
   refuse,
   requireAppRole,
+  requireCanVet,
+  requireNonprofitAdmin,
   requireStaff,
   run,
   sessionStartSeconds,
@@ -90,8 +96,41 @@ async function activeClaimFor(tools: Parameters<ActionHandler>[0]['tools'], sess
 
 export const actions: Record<string, ActionHandler<Env>> = {
   // ── R6 · Is the caller the nonprofit admin? (display only — the worker enforces) ──
-  myAccess: ({ userId, env }) =>
-    run('myAccess', async () => ok({ nonprofitAdmin: !!env.OWNER_USER_ID && userId === env.OWNER_USER_ID })),
+  myAccess: ({ userId, tools, env }) =>
+    run('myAccess', async () => {
+      const nonprofitAdmin = isNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const help = nonprofitAdmin ? null : await activeVettingHelp(tools, userId)
+      const staff = nonprofitAdmin || (await isStaff(tools, userId, env.OWNER_USER_ID))
+      return ok({ nonprofitAdmin, canVet: nonprofitAdmin || (staff && !!help), vettingHelpEndsAt: help?.endsAt ?? null })
+    }),
+
+  // ── R7 · The nonprofit admin asks a staff member for vetting help (time-boxed) ──
+  grantVettingHelp: ({ userId, params, tools, env }) =>
+    run('grantVettingHelp', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const targetId = str(params, 'userId', { required: true, max: 100 })
+      if (targetId === userId) refuse('You already vet as the nonprofit admin.', 'invalid_input')
+      if (!(await isStaff(tools, targetId, env.OWNER_USER_ID))) refuse('Only program staff can be asked to help with vetting.', 'invalid_input')
+      const days = int(params, 'days', { min: 1, max: VETTING_HELP_MAX_DAYS }) ?? VETTING_HELP_DEFAULT_DAYS
+      const reason = str(params, 'reason', { required: true, max: 300 })
+      const startsAt = nowSeconds()
+      const endsAt = startsAt + days * 86400
+      await must(tools.create('vetting_help', { userId: targetId, grantedBy: userId, reason, startsAt, endsAt }, targetId), 'grant help')
+      await audit(tools, { actorId: userId, action: 'grant_vetting_help', targetType: 'user', targetId, toState: `until ${new Date(endsAt * 1000).toISOString().slice(0, 10)}`, reason })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: 'The nonprofit admin asked you to help with vetting.', body: `For ${days} day${days === 1 ? '' : 's'}. ${reason}` })
+      return ok({ userId: targetId, endsAt })
+    }),
+
+  endVettingHelp: ({ userId, params, tools, env }) =>
+    run('endVettingHelp', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const targetId = str(params, 'userId', { required: true, max: 100 })
+      if (!(await activeVettingHelp(tools, targetId))) refuse('That person isn’t helping with vetting right now.', 'stale_state')
+      await must(tools.update('vetting_help', targetId, { endsAt: nowSeconds() }), 'end help')
+      await audit(tools, { actorId: userId, action: 'end_vetting_help', targetType: 'user', targetId, toState: 'ended' })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: 'Your vetting help has ended. Thank you.' })
+      return ok({ userId: targetId })
+    }),
 
   // ── M1 · Volunteer profile / application ──────────────────────────────────
   saveProfile: ({ userId, params, tools }) =>
@@ -134,6 +173,8 @@ export const actions: Record<string, ActionHandler<Env>> = {
       await requireStaff(tools, userId, env.OWNER_USER_ID)
       const targetId = str(params, 'userId', { required: true, max: 100 })
       const role = oneOf(params, 'role', APP_ROLES)
+      // R7: the board seat (second key) is the nonprofit admin's call; staff assign teachers.
+      if (role === 'board_member') requireNonprofitAdmin(userId, env.OWNER_USER_ID)
       const target = await getData(tools, 'users', targetId)
       if (!target) refuse('That user has not signed in yet.', 'not_found')
       const previous = await appRoleOf(tools, targetId)
@@ -149,15 +190,17 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const targetId = str(params, 'userId', { required: true, max: 100 })
       const previous = await appRoleOf(tools, targetId)
       if (!previous) refuse('That user has no app role.', 'not_found')
+      if (previous === 'board_member') requireNonprofitAdmin(userId, env.OWNER_USER_ID)
       await must(tools.remove('role_assignments', targetId), 'remove role')
       await audit(tools, { actorId: userId, action: 'remove_role', targetType: 'user', targetId, fromState: previous ?? '', toState: 'none' })
       return ok({ userId: targetId })
     }),
 
-  // ── M2 · Staff vet volunteers (first key) ─────────────────────────────────
+  // ── M2 · The nonprofit admin vets volunteers (first key, R7) ──────────────
   vetVolunteer: ({ userId, params, tools, env }) =>
     run('vetVolunteer', async () => {
-      await requireStaff(tools, userId, env.OWNER_USER_ID)
+      // R7: the nonprofit admin vets; staff only while the admin has asked them to help.
+      await requireCanVet(tools, userId, env.OWNER_USER_ID)
       const targetId = str(params, 'userId', { required: true, max: 100 })
       const outcome = oneOf(params, 'outcome', ['vetted', 'rejected'] as const)
       const reason = str(params, 'reason', { max: 500 })
@@ -297,6 +340,43 @@ export const actions: Record<string, ActionHandler<Env>> = {
       )
       await audit(tools, { actorId: userId, action: 'create_session', targetType: 'session', targetId: created.recordId, toState: 'open' })
       return ok({ sessionId: created.recordId })
+    }),
+
+  // ── Session readiness · teacher or staff fill in room, time, arrival notes ──
+  updateSessionDetails: ({ userId, params, tools, env }) =>
+    run('updateSessionDetails', async () => {
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session) refuse('Session not found.', 'not_found')
+      const owner = session!.teacherId === userId && (await appRoleOf(tools, userId)) === 'teacher'
+      if (!owner && !(await isStaff(tools, userId, env.OWNER_USER_ID))) refuse('Only the session’s teacher or program staff can edit it.', 'forbidden')
+      if (session!.status === 'cancelled' || session!.status === 'completed') refuse(`This session is ${session!.status}.`, 'stale_state')
+      const startTime = str(params, 'startTime', { max: 5 })
+      if (startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) refuse('Start time must look like 10:15.', 'invalid_input')
+      if (sessionStartSeconds(session!.sessionDate, session!.timeBand, startTime) <= nowSeconds()) refuse('This session has already started.', 'in_past')
+      const before = await getData<SessionDetails>(tools, 'session_details', sessionId)
+      const next = {
+        room: str(params, 'room', { max: 40 }),
+        startTime,
+        arrivalNote: str(params, 'arrivalNote', { max: 300 }),
+        teacherNote: str(params, 'teacherNote', { max: 300 }),
+      }
+      if (before) await must(tools.update('session_details', sessionId, next), 'update details')
+      else await must(tools.create('session_details', { sessionId, teacherId: session!.teacherId, collaborators: [], ...next }, sessionId), 'create details')
+      const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => (before?.[k] ?? '') !== next[k])
+      if (changed.length) {
+        await audit(tools, { actorId: userId, action: 'update_session_details', targetType: 'session', targetId: sessionId, toState: changed.join(',') })
+        const claim = await activeClaimFor(tools, sessionId)
+        if (claim) {
+          await notify(tools, {
+            recipientId: claim.data.volunteerId,
+            kind: 'status_changed',
+            title: `Session details updated: Grade ${session!.grade} · ${topicLabel(session!)}`,
+            body: [next.startTime ? `Starts ${next.startTime}` : '', next.room ? `Room ${next.room}` : '', next.arrivalNote].filter(Boolean).join(' · '),
+          })
+        }
+      }
+      return ok({ sessionId, changed })
     }),
 
   // ── M7 + M8 · Claim a session, notify both sides ──────────────────────────

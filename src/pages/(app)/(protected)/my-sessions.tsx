@@ -141,7 +141,7 @@ export default function MySessionsPage() {
       {!me.canClaim && bookings.length === 0 && (
         <EmptyState
           title="No sessions yet"
-          description={me.volunteer ? 'Once you’re approved, claim a session from the board.' : 'Apply to volunteer first. Program staff and the nonprofit’s board approve every volunteer.'}
+          description={me.volunteer ? 'Once you’re approved, claim a session from the board.' : 'Apply to volunteer first. The nonprofit vets and its board approves every volunteer.'}
         />
       )}
 
@@ -168,7 +168,7 @@ export default function MySessionsPage() {
                     </div>
 
                     <dl className="mt-4 space-y-1.5">
-                      <Fact label="Room">{b.details?.room || 'The teacher will add it'}</Fact>
+                      <Fact label="Room">{b.details?.room || 'Not set yet — the teacher or program staff will add it'}</Fact>
                       {b.details?.arrivalNote && <Fact label="On arrival">{b.details.arrivalNote}</Fact>}
                       {b.details?.teacherNote && <Fact label="From the teacher">{b.details.teacherNote}</Fact>}
                       {b.session!.expectedHeadcount ? <Fact label="Class size">About {b.session!.expectedHeadcount} students</Fact> : null}

@@ -125,3 +125,16 @@ describe('audit_log — append-only (M9, GUARDRAILS §1.10)', () => {
     })
   }
 })
+
+describe('vetting_help (decision R7)', () => {
+  const s = S.vetting_help
+  it('staff (admin) cannot grant, extend or remove vetting help directly — only the owner-only actions', () => {
+    expect(canCreate(s, 'admin')).toBe(false)
+    expect(canUpdate(s, 'admin', rec({ userId: STAFF }), STAFF)).toBe(false)
+    expect(canDelete(s, 'admin', rec({ userId: STAFF }), STAFF)).toBe(false)
+  })
+  it('a member reads only their own row', () => {
+    expect(canRead(s, 'member', rec({ userId: VOL }), VOL)).toBe(true)
+    expect(canRead(s, 'member', rec({ userId: STAFF }), VOL)).toBe(false)
+  })
+})

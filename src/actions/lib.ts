@@ -131,6 +131,30 @@ export async function isStaff(tools: ActionTools, userId: string, ownerUserId?: 
   return user?.role === 'admin'
 }
 
+/** The nonprofit admin = the account that owns the app on DeepSpace (platform-proven). */
+export const isNonprofitAdmin = (userId: string, ownerUserId?: string): boolean => !!ownerUserId && userId === ownerUserId
+
+export function requireNonprofitAdmin(userId: string, ownerUserId?: string): void {
+  if (!isNonprofitAdmin(userId, ownerUserId)) refuse('Only the nonprofit admin can do this.', 'forbidden')
+}
+
+/** Active vetting help for this user (R7), or null. Must still be staff to use it. */
+export async function activeVettingHelp(tools: ActionTools, userId: string): Promise<{ endsAt: number } | null> {
+  const row = await getData<{ startsAt?: number; endsAt?: number }>(tools, 'vetting_help', userId)
+  const now = nowSeconds()
+  return row && (row.startsAt ?? 0) <= now && (row.endsAt ?? 0) > now ? { endsAt: row.endsAt! } : null
+}
+
+/**
+ * Who may vet (first key, R7): the nonprofit admin; or a staff member the admin has
+ * asked for help, while that help is active.
+ */
+export async function requireCanVet(tools: ActionTools, userId: string, ownerUserId?: string): Promise<void> {
+  if (isNonprofitAdmin(userId, ownerUserId)) return
+  if ((await isStaff(tools, userId, ownerUserId)) && (await activeVettingHelp(tools, userId))) return
+  refuse('Vetting is done by the nonprofit admin, or by staff the admin has asked for help.', 'forbidden')
+}
+
 export async function appRoleOf(tools: ActionTools, userId: string): Promise<AppRole | null> {
   const row = await getData<{ role?: string }>(tools, 'role_assignments', userId)
   return row && (APP_ROLES as readonly string[]).includes(row.role ?? '') ? (row.role as AppRole) : null

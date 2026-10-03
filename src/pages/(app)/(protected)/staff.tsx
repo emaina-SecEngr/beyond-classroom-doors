@@ -1,14 +1,18 @@
 /**
- * Staff desk — program staff (DeepSpace admins) only (M2, M4, M9).
+ * Staff desk — program staff (DeepSpace admins) only (M2, M4, M9, R6, R7).
  *
- *   Applicants       vet new volunteers: identity, license, clearance (the first key)
+ *   Sessions         what each upcoming session still needs (staff's day job)
+ *   Applicants       the vetting queue; only the nonprofit admin vets, or staff
+ *                    the admin has asked for help (time-boxed, R7)
  *   Volunteers       everyone's status at a glance
- *   People & roles   give teacher / school-admin access
+ *   People & roles   program staff (nonprofit admin only), teachers (staff),
+ *                    board approvers (nonprofit admin only)
  *   Change requests  late cancellations and reschedules from volunteers
  *   Audit log        every privileged action, append-only
  *
  * Staff read these collections directly (admin read: true); every write is a
- * server action that re-checks staff status on the server.
+ * server action (or the worker's set-role guard) that re-checks on the server.
+ * `myAccess` only decides what to SHOW.
  */
 import { useEffect, useState } from 'react'
 import { useQuery, useUsers } from 'deepspace'
@@ -33,10 +37,24 @@ import {
   useToast,
 } from '@/components/ui'
 import { ErrorNote, Fact, Field, Loading, Page } from '../../../components/Page'
+import { SessionDetailsModal, type EditableDetails } from '../../../components/SessionDetailsModal'
 import { callAction } from '../../../lib/actions'
-import { formatDay, formatInstant, PROGRAM_EMAIL, todayInSanDiego, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABELS } from '../../../lib/labels'
+import {
+  formatDay,
+  formatInstant,
+  formatSessionDate,
+  PROGRAM_EMAIL,
+  SESSION_STATUS_BADGE,
+  SESSION_STATUS_LABELS,
+  sessionTimeText,
+  todayInSanDiego,
+  todaySeconds,
+  topicText,
+  VOLUNTEER_STATUS_BADGE,
+  VOLUNTEER_STATUS_LABELS,
+} from '../../../lib/labels'
 import { useMe, type ProfileRow, type VolunteerStatusRow } from '../../../lib/me'
-import type { AppRole } from '../../../schemas/shared'
+import { VETTING_HELP_DEFAULT_DAYS, VETTING_HELP_MAX_DAYS, type AppRole, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
 interface StatusRow extends VolunteerStatusRow {
   identityConfirmed?: boolean | number
@@ -62,6 +80,13 @@ interface ChangeRow {
 
 const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher', board_member: 'Board approver' }
 
+interface Access {
+  nonprofitAdmin: boolean
+  canVet: boolean
+  vettingHelpEndsAt: number | null
+}
+const NO_ACCESS: Access = { nonprofitAdmin: false, canVet: false, vettingHelpEndsAt: null }
+
 export default function StaffPage() {
   const me = useMe()
   if (!me.ready) return <Loading />
@@ -79,15 +104,28 @@ function StaffDesk() {
   const statuses = useQuery<StatusRow>('volunteer_status', { limit: 500 })
   const profiles = useQuery<ProfileRow>('profiles', { limit: 500 })
   const { users, usersLoaded, setRole } = useUsers()
+  const [access, setAccess] = useState<Access | null>(null)
+
+  // Display only: the server re-checks every one of these on every action.
+  useEffect(() => {
+    let live = true
+    void callAction<Access>('myAccess').then((r) => {
+      if (live) setAccess(r.success ? r.data : NO_ACCESS)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   const profileById = new Map(profiles.records.map((r) => [r.data.userId, r.data]))
   const nameOf = (id: string) => profileById.get(id)?.displayName || users.find((u) => u.id === id)?.name || 'Unknown user'
   const queue = statuses.records.filter((r) => r.data.status === 'applied' || r.data.status === 'renewal_pending')
 
   return (
-    <Page title="Staff desk" intro="Vet volunteers, give school access, and keep an eye on changes." wide>
-      <Tabs defaultValue="applicants">
-        <TabsList>
+    <Page title="Staff desk" intro="Work with teachers so every session is ready for its volunteer, and keep an eye on changes." wide>
+      <Tabs defaultValue="sessions">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="applicants">Applicants{queue.length ? ` (${queue.length})` : ''}</TabsTrigger>
           <TabsTrigger value="volunteers">Volunteers</TabsTrigger>
           <TabsTrigger value="roles">People &amp; roles</TabsTrigger>
@@ -95,13 +133,17 @@ function StaffDesk() {
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="sessions" className="pt-6">
+          <Sessions nameOf={nameOf} />
+        </TabsContent>
+
         <TabsContent value="applicants" className="pt-6">
-          {statuses.status === 'loading' || profiles.status === 'loading' ? (
+          {statuses.status === 'loading' || profiles.status === 'loading' || access === null ? (
             <Loading />
           ) : statuses.status === 'error' ? (
             <ErrorNote message={statuses.error || 'Could not load applicants.'} />
           ) : (
-            <Applicants queue={queue.map((r) => ({ ...r.data, profile: profileById.get(r.data.userId) ?? null }))} />
+            <Applicants access={access} queue={queue.map((r) => ({ ...r.data, profile: profileById.get(r.data.userId) ?? null }))} />
           )}
         </TabsContent>
 
@@ -125,12 +167,12 @@ function StaffDesk() {
         </TabsContent>
 
         <TabsContent value="roles" className="pt-6">
-          {!usersLoaded ? (
+          {!usersLoaded || access === null ? (
             <Loading />
           ) : (
             <>
-              <ProgramStaff people={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} setRole={setRole} />
-              <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />
+              <ProgramStaff access={access} people={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} setRole={setRole} />
+              <Roles nonprofitAdmin={access.nonprofitAdmin} users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />
             </>
           )}
         </TabsContent>
@@ -161,7 +203,7 @@ const EMPTY_VET = {
   reason: '',
 }
 
-function Applicants({ queue }: { queue: Applicant[] }) {
+function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
   const toast = useToast()
   const [open, setOpen] = useState<Applicant | null>(null)
   const [form, setForm] = useState(EMPTY_VET)
@@ -169,6 +211,12 @@ function Applicants({ queue }: { queue: Applicant[] }) {
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   if (queue.length === 0) return <EmptyState title="No one waiting" description="New volunteer applications appear here." />
+
+  const notice = !access.canVet
+    ? 'Vetting is done by the nonprofit admin. You can see who’s waiting; the admin can ask you to help if they need to.'
+    : access.vettingHelpEndsAt
+      ? `The nonprofit admin asked you to help with vetting until ${formatInstant(access.vettingHelpEndsAt)}.`
+      : null
 
   async function decide(outcome: 'vetted' | 'rejected') {
     if (!open) return
@@ -188,6 +236,7 @@ function Applicants({ queue }: { queue: Applicant[] }) {
 
   return (
     <>
+      {notice && <p className="mb-4 rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">{notice}</p>}
       <ul className="space-y-3">
         {queue.map((a) => (
           <li key={a.userId} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
@@ -200,15 +249,17 @@ function Applicants({ queue }: { queue: Applicant[] }) {
             </div>
             <div className="flex items-center gap-3">
               <Badge variant={VOLUNTEER_STATUS_BADGE[a.status]}>{VOLUNTEER_STATUS_LABELS[a.status]}</Badge>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setForm(EMPTY_VET)
-                  setOpen(a)
-                }}
-              >
-                Review
-              </Button>
+              {access.canVet && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setForm(EMPTY_VET)
+                    setOpen(a)
+                  }}
+                >
+                  Review
+                </Button>
+              )}
             </div>
           </li>
         ))}
@@ -272,22 +323,49 @@ function Applicants({ queue }: { queue: Applicant[] }) {
 // asks the server who you are (myAccess) only to decide what to show; the worker
 // (AppRecordRoom + staff-guard.ts) refuses anyone else and audits every change.
 
-function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId: string, role: string) => void }) {
+function ProgramStaff({ people, setRole, access }: { people: Person[]; setRole: (userId: string, role: string) => void; access: Access }) {
   const toast = useToast()
   const me = useMe()
-  const [isNonprofitAdmin, setIsNonprofitAdmin] = useState<boolean | null>(null)
+  const isNonprofitAdmin = access.nonprofitAdmin
+  const help = useQuery<{ userId: string; endsAt: number; reason: string }>('vetting_help', { limit: 200 })
   const [confirming, setConfirming] = useState<{ person: Person; role: 'admin' | 'member' } | null>(null)
-  const [pending, setPending] = useState<{ id: string; role: 'admin' | 'member'; name: string; since: number } | null>(null)
+  const [pending, setPending] = useState<{ id: string; role: 'admin' | 'member'; name: string } | null>(null)
+  const [asking, setAsking] = useState<Person | null>(null)
+  const [helpDays, setHelpDays] = useState(String(VETTING_HELP_DEFAULT_DAYS))
+  const [helpReason, setHelpReason] = useState('')
+  const [ending, setEnding] = useState<Person | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    let live = true
-    void callAction<{ nonprofitAdmin: boolean }>('myAccess').then((r) => {
-      if (live) setIsNonprofitAdmin(r.success && r.data.nonprofitAdmin)
-    })
-    return () => {
-      live = false
+  const now = Date.now() / 1000
+  const helpUntil = new Map(help.records.filter((r) => r.data.endsAt > now).map((r) => [r.data.userId, r.data.endsAt]))
+
+  async function askForHelp() {
+    if (!asking) return
+    setBusy(true)
+    const res = await callAction('grantVettingHelp', { userId: asking.id, days: Number(helpDays), reason: helpReason })
+    setBusy(false)
+    if (!res.success) {
+      toast.error('Could not ask for help', res.error)
+      return
     }
-  }, [])
+    toast.success(`${asking.name || asking.email} can help with vetting`, `For ${helpDays} day${helpDays === '1' ? '' : 's'}. You can end it any time.`)
+    setAsking(null)
+    setHelpReason('')
+    setHelpDays(String(VETTING_HELP_DEFAULT_DAYS))
+  }
+
+  async function endHelp() {
+    if (!ending) return
+    setBusy(true)
+    const res = await callAction('endVettingHelp', { userId: ending.id })
+    setBusy(false)
+    if (!res.success) {
+      toast.error('Could not end help', res.error)
+      return
+    }
+    toast.success('Vetting help ended')
+    setEnding(null)
+  }
 
   // setRole is fire-and-forget over the realtime connection, so we confirm the change
   // by watching the live user list, and report a failure if it doesn't land in time.
@@ -306,7 +384,6 @@ function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId:
     return () => clearTimeout(t)
   }, [pending, people, toast])
 
-  if (isNonprofitAdmin === null) return null
   if (!isNonprofitAdmin) {
     return (
       <p className="mb-6 rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
@@ -321,7 +398,7 @@ function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId:
     <section className="mb-8">
       <h3 className="font-semibold">Program staff</h3>
       <p className="mt-1 text-sm text-muted-foreground">
-        Staff vet volunteers and manage roles. As the nonprofit admin, only you can add or remove them. Every change is in the audit log.
+        Staff work with teachers so sessions are ready. You vet volunteers; if you need a hand, ask a staff member to help for a set time. Only you can add or remove staff. Every change is in the audit log.
       </p>
       {others.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">No one else has signed in yet.</p>
@@ -336,6 +413,17 @@ function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId:
                   <p className="truncate text-xs text-muted-foreground">{p.email}</p>
                 </div>
                 {isStaff && <Badge variant="secondary">Program staff</Badge>}
+                {isStaff && helpUntil.has(p.id) && <Badge variant="info">Helping vet until {formatDay(helpUntil.get(p.id) ?? null)}</Badge>}
+                {isStaff &&
+                  (helpUntil.has(p.id) ? (
+                    <Button size="sm" variant="ghost" onClick={() => setEnding(p)}>
+                      End vetting help
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setAsking(p)}>
+                      Ask to help vet
+                    </Button>
+                  ))}
                 <Button
                   size="sm"
                   variant={isStaff ? 'ghost' : 'outline'}
@@ -356,7 +444,7 @@ function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId:
         onConfirm={() => {
           if (!confirming) return
           const { person, role } = confirming
-          setPending({ id: person.id, role, name: person.name || person.email, since: Date.now() })
+          setPending({ id: person.id, role, name: person.name || person.email })
           setRole(person.id, role)
           setConfirming(null)
         }}
@@ -369,11 +457,48 @@ function ProgramStaff({ people, setRole }: { people: Person[]; setRole: (userId:
         }
         description={
           confirming?.role === 'admin'
-            ? 'They’ll be able to vet volunteers, assign teacher and board roles, and read the audit log. Staff can’t give board approval.'
+            ? 'They’ll work with teachers on sessions, assign teacher roles, and read the audit log. They can’t vet unless you ask them to help, and staff can never give board approval.'
             : 'They’ll lose the staff desk immediately.'
         }
         confirmText={confirming?.role === 'admin' ? 'Make staff' : 'Remove staff'}
         variant={confirming?.role === 'admin' ? 'default' : 'destructive'}
+      />
+      <Modal open={!!asking} onClose={() => !busy && setAsking(null)} size="sm">
+        <Modal.Header>
+          <Modal.Title>Ask {asking?.name || asking?.email} to help vet?</Modal.Title>
+          <Modal.Description>They can vet volunteers until the help ends. The board still gives the final approval.</Modal.Description>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="space-y-4">
+            <Field label={`For how many days? (1–${VETTING_HELP_MAX_DAYS})`} htmlFor="helpDays">
+              <Input id="helpDays" type="number" inputMode="numeric" min={1} max={VETTING_HELP_MAX_DAYS} value={helpDays} onChange={(e) => setHelpDays(e.target.value)} />
+            </Field>
+            <Field label="Why (recorded in the audit log)" htmlFor="helpReason" hint="For example: I’m travelling Oct 10–20.">
+              <Textarea id="helpReason" rows={2} value={helpReason} onChange={(e) => setHelpReason(e.target.value)} maxLength={300} />
+            </Field>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="ghost" onClick={() => setAsking(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void askForHelp()}
+            loading={busy}
+            disabled={!helpReason.trim() || !(Number(helpDays) >= 1 && Number(helpDays) <= VETTING_HELP_MAX_DAYS)}
+          >
+            Ask for help
+          </Button>
+        </Modal.Footer>
+      </Modal>
+      <ConfirmModal
+        open={!!ending}
+        onClose={() => !busy && setEnding(null)}
+        onConfirm={() => void endHelp()}
+        title={`End ${ending?.name || ending?.email || 'this'}’s vetting help?`}
+        description="They’ll stop being able to vet right away."
+        confirmText="End help"
+        loading={busy}
       />
     </section>
   )
@@ -388,7 +513,7 @@ interface Person {
   platformRole: string
 }
 
-function Roles({ users }: { users: Person[] }) {
+function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boolean }) {
   const toast = useToast()
   const roles = useQuery<{ userId: string; role: AppRole }>('role_assignments', { limit: 500 })
   const [choice, setChoice] = useState<Record<string, string>>({})
@@ -423,7 +548,11 @@ function Roles({ users }: { users: Person[] }) {
   return (
     <>
       <p className="mb-4 text-sm text-muted-foreground">
-        Give teacher access to the school’s teachers, and board-approver access to the board member(s) who approve volunteers. Board approvers can’t be program staff. Volunteers need no role.
+        Give teacher access to the school’s teachers.{' '}
+        {nonprofitAdmin
+          ? 'As the nonprofit admin, you also seat the board member(s) who approve volunteers; board approvers can’t be program staff.'
+          : 'Board approvers are seated by the nonprofit admin.'}{' '}
+        Volunteers need no role.
       </p>
       <ul className="divide-y divide-border rounded-md border border-border bg-card">
         {users.map((p) => {
@@ -443,13 +572,13 @@ function Roles({ users }: { users: Person[] }) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="teacher">Teacher</SelectItem>
-                    <SelectItem value="board_member">Board approver</SelectItem>
+                    {nonprofitAdmin && <SelectItem value="board_member">Board approver</SelectItem>}
                   </SelectContent>
                 </Select>
                 <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id} disabled={!choice[p.id] || choice[p.id] === current}>
                   Assign
                 </Button>
-                {current && (
+                {current && (current !== 'board_member' || nonprofitAdmin) && (
                   <Button size="sm" variant="ghost" onClick={() => setRemoving(p)}>
                     Remove
                   </Button>
@@ -468,6 +597,123 @@ function Roles({ users }: { users: Person[] }) {
         confirmText="Remove access"
         loading={busyId !== null}
       />
+    </>
+  )
+}
+
+// ── Sessions: is each upcoming session ready for its volunteer? ─────────────
+
+interface SessionRow {
+  teacherId: string
+  grade: string
+  topic: string
+  topicOther: string
+  sessionDate: number
+  timeBand: TimeBand
+  expectedHeadcount: number | null
+  status: SessionStatus
+}
+interface DetailsRow {
+  sessionId: string
+  room: string
+  startTime: string
+  arrivalNote: string
+  teacherNote: string
+}
+interface ClaimRow {
+  sessionId: string
+  volunteerId: string
+  status: 'active' | 'withdrawn'
+  confirmedAt: number | null
+}
+
+/** What still stands between this session and a volunteer walking into the room. */
+function missingFor(s: SessionRow, d: DetailsRow | undefined, claim: ClaimRow | undefined): string[] {
+  const out: string[] = []
+  if (!claim) out.push('No volunteer yet')
+  else if (!claim.confirmedAt) out.push('Volunteer hasn’t confirmed')
+  if (!d?.room) out.push('No room')
+  if (!d?.arrivalNote) out.push('No arrival instructions')
+  if (!d?.startTime) out.push('No exact start time')
+  return s.status === 'cancelled' ? [] : out
+}
+
+function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
+  const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
+  const details = useQuery<DetailsRow>('session_details', { limit: 500 })
+  const claims = useQuery<ClaimRow>('claims', { where: { status: 'active' }, limit: 500 })
+  const [editing, setEditing] = useState<EditableDetails | null>(null)
+
+  if (sessions.status === 'loading' || details.status === 'loading' || claims.status === 'loading') return <Loading />
+  if (sessions.status === 'error') return <ErrorNote message={sessions.error || 'Could not load sessions.'} />
+
+  const detailsById = new Map(details.records.map((r) => [r.data.sessionId, r.data]))
+  const claimBySession = new Map(claims.records.map((r) => [r.data.sessionId, r.data]))
+  const today = todaySeconds()
+  const upcoming = sessions.records
+    .filter((r) => r.data.sessionDate >= today && r.data.status !== 'cancelled' && r.data.status !== 'completed')
+    .sort((a, b) => a.data.sessionDate - b.data.sessionDate)
+
+  if (upcoming.length === 0) return <EmptyState title="No upcoming sessions" description="Sessions appear here as teachers post requests." />
+
+  const readyCount = upcoming.filter((r) => missingFor(r.data, detailsById.get(r.recordId), claimBySession.get(r.recordId)).length === 0).length
+
+  return (
+    <>
+      <p className="mb-4 text-sm text-muted-foreground">
+        {readyCount} of {upcoming.length} upcoming session{upcoming.length === 1 ? '' : 's'} ready. Work with the teacher to fill any gaps; the booked volunteer is told about every change.
+      </p>
+      <ul className="space-y-3">
+        {upcoming.map((r) => {
+          const d = detailsById.get(r.recordId)
+          const claim = claimBySession.get(r.recordId)
+          const missing = missingFor(r.data, d, claim)
+          const label = `Grade ${r.data.grade} · ${topicText(r.data.topic, r.data.topicOther)}`
+          return (
+            <li key={r.recordId} className="rounded-md border border-border bg-card p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium">{label}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatSessionDate(r.data.sessionDate)}, {sessionTimeText(r.data.timeBand, d?.startTime)} · Teacher: {nameOf(r.data.teacherId)}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Volunteer: {claim ? nameOf(claim.volunteerId) : '—'}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={SESSION_STATUS_BADGE[r.data.status]}>{SESSION_STATUS_LABELS[r.data.status]}</Badge>
+                  {missing.length === 0 ? <Badge variant="success">Ready</Badge> : <Badge variant="warning">{missing.length} to do</Badge>}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setEditing({
+                        sessionId: r.recordId,
+                        label: `${label}, ${formatSessionDate(r.data.sessionDate)}`,
+                        room: d?.room ?? '',
+                        startTime: d?.startTime ?? '',
+                        arrivalNote: d?.arrivalNote ?? '',
+                        teacherNote: d?.teacherNote ?? '',
+                      })
+                    }
+                  >
+                    Details
+                  </Button>
+                </div>
+              </div>
+              {missing.length > 0 && (
+                <ul className="mt-3 flex flex-wrap gap-2 text-xs">
+                  {missing.map((m) => (
+                    <li key={m} className="rounded border border-border px-2 py-0.5 text-muted-foreground">
+                      {m}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      <SessionDetailsModal details={editing} onClose={() => setEditing(null)} />
     </>
   )
 }
