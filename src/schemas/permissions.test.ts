@@ -164,3 +164,17 @@ describe('teacher_invites (D10)', () => {
     expect(canUpdate(s, 'admin', rec({ email: 'x@y.z' }), STAFF)).toBe(false)
   })
 })
+
+describe('staff_schools (D11)', () => {
+  const s = S.staff_schools
+  it('nobody writes staff school assignments directly — only the program admin, through an action', () => {
+    for (const role of ['member', 'admin'] as const) {
+      expect(canCreate(s, role)).toBe(false)
+      expect(canUpdate(s, role, rec({ userId: STAFF }), STAFF)).toBe(false)
+    }
+  })
+  it('a member reads only their own assignment', () => {
+    expect(canRead(s, 'member', rec({ userId: VOL }), VOL)).toBe(true)
+    expect(canRead(s, 'member', rec({ userId: STAFF }), VOL)).toBe(false)
+  })
+})

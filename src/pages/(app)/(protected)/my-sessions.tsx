@@ -21,11 +21,14 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  Checkbox,
+  Input,
   useToast,
 } from '@/components/ui'
 import { ErrorNote, Fact, Field, Loading, Page, Section } from '../../../components/Page'
 import { callAction } from '../../../lib/actions'
 import {
+  EQUIPMENT_LABELS,
   formatInstant,
   formatSessionDate,
   PROGRAM_EMAIL,
@@ -38,7 +41,7 @@ import {
 import { useMe } from '../../../lib/me'
 import { useSchools } from '../../../lib/schools'
 import { sessionStartSeconds } from '../../../lib/time'
-import { SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
+import { EQUIPMENT, SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
 interface ClaimRow {
   sessionId: string
@@ -63,6 +66,11 @@ interface DetailsRow {
   startTime: string
   arrivalNote: string
   teacherNote: string
+  classLabel?: string
+  studentCount?: number | null
+  equipmentRequested?: string[]
+  equipmentOther?: string
+  equipmentReady?: string[]
 }
 
 interface Booking {
@@ -178,8 +186,15 @@ export default function MySessionsPage() {
                       <Fact label="Room">{b.details?.room || 'Not set yet — the teacher or program staff will add it'}</Fact>
                       {b.details?.arrivalNote && <Fact label="On arrival">{b.details.arrivalNote}</Fact>}
                       {b.details?.teacherNote && <Fact label="From the teacher">{b.details.teacherNote}</Fact>}
-                      {b.session!.expectedHeadcount ? <Fact label="Class size">About {b.session!.expectedHeadcount} students</Fact> : null}
+                      {b.details?.classLabel && <Fact label="Class">{b.details.classLabel}</Fact>}
+                      {b.details?.studentCount ? (
+                        <Fact label="Students">{b.details.studentCount} taking part</Fact>
+                      ) : b.session!.expectedHeadcount ? (
+                        <Fact label="Class size">About {b.session!.expectedHeadcount} students</Fact>
+                      ) : null}
                     </dl>
+
+                    <NeedsEditor sessionId={b.sessionId} details={b.details} />
 
                     <div className="mt-5 flex flex-wrap gap-2">
                       {status === 'claimed' && (
@@ -293,5 +308,95 @@ export default function MySessionsPage() {
         </Modal.Footer>
       </Modal>
     </Page>
+  )
+}
+
+/**
+ * What the volunteer needs for their talk (D11). They tick items and save; the
+ * teacher is told and marks each one ready, which shows here as "Ready".
+ */
+function NeedsEditor({ sessionId, details }: { sessionId: string; details: DetailsRow | null }) {
+  const toast = useToast()
+  const saved = details?.equipmentRequested ?? []
+  const ready = new Set(details?.equipmentReady ?? [])
+  const [editing, setEditing] = useState(false)
+  const [items, setItems] = useState<string[]>(saved)
+  const [other, setOther] = useState(details?.equipmentOther ?? '')
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    setBusy(true)
+    const res = await callAction('requestEquipment', { sessionId, items, other })
+    setBusy(false)
+    if (!res.success) {
+      toast.error('Could not save', res.error)
+      return
+    }
+    toast.success('Sent to the teacher', 'They’ll mark each item as ready.')
+    setEditing(false)
+  }
+
+  return (
+    <div className="mt-5 rounded-md border border-border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold">What you’ll need</h4>
+        {!editing && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setItems(saved)
+              setOther(details?.equipmentOther ?? '')
+              setEditing(true)
+            }}
+          >
+            {saved.length || details?.equipmentOther ? 'Change' : 'Add items'}
+          </Button>
+        )}
+      </div>
+      {editing ? (
+        <div className="mt-3 space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {EQUIPMENT.map((e) => (
+              <label key={e} className="flex items-center gap-3 text-sm">
+                <Checkbox checked={items.includes(e)} onCheckedChange={(c) => setItems((v) => (c ? [...v, e] : v.filter((x) => x !== e)))} />
+                <span>{EQUIPMENT_LABELS[e]}</span>
+              </label>
+            ))}
+          </div>
+          <Field label="Anything else?" htmlFor={`other-${sessionId}`}>
+            <Input id={`other-${sessionId}`} value={other} onChange={(e) => setOther(e.target.value)} maxLength={200} placeholder="For example: a table near an outlet" />
+          </Field>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => void save()} loading={busy}>
+              Send to the teacher
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : saved.length === 0 && !details?.equipmentOther ? (
+        <p className="mt-1 text-sm text-muted-foreground">Projector, markers, paper? Tell the teacher what to have ready.</p>
+      ) : (
+        <ul className="mt-2 space-y-1 text-sm">
+          {saved.map((e) => (
+            <li key={e} className="flex items-center gap-2">
+              <span>{EQUIPMENT_LABELS[e as keyof typeof EQUIPMENT_LABELS] ?? e}</span>
+              {ready.has(e) ? (
+                <Badge variant="success" size="sm">
+                  Ready
+                </Badge>
+              ) : (
+                <Badge variant="outline" size="sm">
+                  Waiting
+                </Badge>
+              )}
+            </li>
+          ))}
+          {details?.equipmentOther && <li className="text-muted-foreground">Also: {details.equipmentOther}</li>}
+        </ul>
+      )}
+    </div>
   )
 }

@@ -1,7 +1,7 @@
 /**
  * Display labels and formatting shared by the pages. Pure functions, no data access.
  */
-import type { SessionStatus, TimeBand, Topic, VolunteerStatus } from '../schemas/shared'
+import type { Equipment, SessionStatus, TimeBand, Topic, VolunteerStatus } from '../schemas/shared'
 
 export const TOPIC_LABELS: Record<Topic, string> = {
   healthcare: 'Healthcare',
@@ -118,6 +118,16 @@ export function todayInSanDiego(): string {
 export function todaySeconds(): number {
   const [y, m, d] = todayInSanDiego().split('-').map(Number)
   return Date.UTC(y, m - 1, d) / 1000
+}
+
+export const EQUIPMENT_LABELS: Record<Equipment, string> = {
+  projector: 'Projector',
+  screen_hdmi: 'Screen with HDMI cable',
+  whiteboard_markers: 'Whiteboard markers',
+  sharpies: 'Sharpies',
+  paper: 'Paper',
+  speakers: 'Speakers',
+  wifi: 'Wi-Fi access',
 }
 
 export const PROGRAM_EMAIL = 'mainin2003@yahoo.com'

@@ -53,6 +53,10 @@ export const CHANGE_REQUEST_STATUSES = ['open', 'resolved'] as const
 /** Self-service withdrawal is allowed only this far ahead of a session (SH6). */
 export const SELF_WITHDRAW_MIN_HOURS = 48
 
+/** What a volunteer can ask the school to have ready (D11). */
+export const EQUIPMENT = ['projector', 'screen_hdmi', 'whiteboard_markers', 'sharpies', 'paper', 'speakers', 'wifi'] as const
+export type Equipment = (typeof EQUIPMENT)[number]
+
 /** Vetting help (R7): default and maximum length of a grant, in days. */
 export const VETTING_HELP_DEFAULT_DAYS = 14
 export const VETTING_HELP_MAX_DAYS = 30

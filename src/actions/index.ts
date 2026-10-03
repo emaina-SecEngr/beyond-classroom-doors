@@ -16,6 +16,8 @@ import {
   APP_ROLES,
   GRADES,
   SELF_WITHDRAW_MIN_HOURS,
+  EQUIPMENT,
+  type Equipment,
   VETTING_HELP_DEFAULT_DAYS,
   VETTING_HELP_MAX_DAYS,
   TIME_BANDS,
@@ -77,6 +79,12 @@ interface SessionRequest extends Record<string, unknown> {
   schoolId?: string
 }
 interface SessionDetails extends Record<string, unknown> {
+  classLabel?: string
+  studentCount?: number | null
+  equipmentRequested?: string[]
+  equipmentOther?: string
+  equipmentReady?: string[]
+  volunteerName?: string
   sessionId: string
   teacherId: string
   room: string
@@ -100,6 +108,34 @@ const topicLabel = (r: Pick<SessionRequest, 'topic' | 'topicOther'>) =>
 async function activeClaimFor(tools: Parameters<ActionHandler>[0]['tools'], sessionId: string) {
   const r = await tools.query<Claim>('claims', { where: { activeSlot: sessionId }, limit: 1 })
   return r.success && r.data.records.length ? r.data.records[0] : null
+}
+
+/**
+ * Who may change a session (D11): its own teacher, the program admin, or staff
+ * assigned to the session's school. Other staff are refused.
+ */
+async function requireSessionEditor(tools: Parameters<ActionHandler>[0]['tools'], userId: string, ownerUserId: string | undefined, session: SessionRequest) {
+  if (session.teacherId === userId && (await appRoleOf(tools, userId)) === 'teacher') return
+  if (isNonprofitAdmin(userId, ownerUserId)) return
+  if (await isStaff(tools, userId, ownerUserId)) {
+    const mine = await getData<{ schoolId?: string }>(tools, 'staff_schools', userId)
+    if (mine?.schoolId && mine.schoolId === session.schoolId) return
+    refuse('You can only change sessions at the school you’re assigned to.', 'forbidden')
+  }
+  refuse('Only the session’s teacher or program staff can change it.', 'forbidden')
+}
+
+/** Equipment list from params: known items only, no duplicates. */
+function equipmentParam(params: Record<string, unknown>, key: string): Equipment[] {
+  const raw = params[key]
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) refuse(`${key} must be a list.`, 'invalid_input')
+  const out = new Set<Equipment>()
+  for (const v of raw as unknown[]) {
+    if (typeof v !== 'string' || !(EQUIPMENT as readonly string[]).includes(v)) refuse(`Unknown item: ${String(v).slice(0, 30)}.`, 'invalid_input')
+    out.add(v as Equipment)
+  }
+  return [...out]
 }
 
 /** Turn a pending invite into teacher access at its school (D10). */
@@ -450,22 +486,28 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const sessionId = str(params, 'sessionId', { required: true, max: 100 })
       const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
       if (!session) refuse('Session not found.', 'not_found')
-      const owner = session!.teacherId === userId && (await appRoleOf(tools, userId)) === 'teacher'
-      if (!owner && !(await isStaff(tools, userId, env.OWNER_USER_ID))) refuse('Only the session’s teacher or program staff can edit it.', 'forbidden')
+      await requireSessionEditor(tools, userId, env.OWNER_USER_ID, session!)
       if (session!.status === 'cancelled' || session!.status === 'completed') refuse(`This session is ${session!.status}.`, 'stale_state')
       const startTime = str(params, 'startTime', { max: 5 })
       if (startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) refuse('Start time must look like 10:15.', 'invalid_input')
       if (sessionStartSeconds(session!.sessionDate, session!.timeBand, startTime) <= nowSeconds()) refuse('This session has already started.', 'in_past')
       const before = await getData<SessionDetails>(tools, 'session_details', sessionId)
+      // Only items the volunteer actually asked for can be marked ready.
+      const requested = new Set(before?.equipmentRequested ?? [])
+      const ready = equipmentParam(params, 'equipmentReady').filter((e) => requested.has(e))
       const next = {
         room: str(params, 'room', { max: 40 }),
         startTime,
         arrivalNote: str(params, 'arrivalNote', { max: 300 }),
         teacherNote: str(params, 'teacherNote', { max: 300 }),
+        classLabel: str(params, 'classLabel', { max: 80 }),
+        studentCount: int(params, 'studentCount', { min: 1, max: 200 }),
       }
-      if (before) await must(tools.update('session_details', sessionId, next), 'update details')
-      else await must(tools.create('session_details', { sessionId, teacherId: session!.teacherId, collaborators: [], ...next }, sessionId), 'create details')
-      const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => (before?.[k] ?? '') !== next[k])
+      const all = { ...next, equipmentReady: ready }
+      if (before) await must(tools.update('session_details', sessionId, all), 'update details')
+      else await must(tools.create('session_details', { sessionId, teacherId: session!.teacherId, collaborators: [], ...all }, sessionId), 'create details')
+      const changed: string[] = (Object.keys(next) as (keyof typeof next)[]).filter((k) => (before?.[k] ?? (k === 'studentCount' ? null : '')) !== next[k])
+      if (JSON.stringify([...(before?.equipmentReady ?? [])].sort()) !== JSON.stringify([...ready].sort())) changed.push('equipmentReady')
       if (changed.length) {
         await audit(tools, { actorId: userId, action: 'update_session_details', targetType: 'session', targetId: sessionId, toState: changed.join(',') })
         const claim = await activeClaimFor(tools, sessionId)
@@ -474,11 +516,62 @@ export const actions: Record<string, ActionHandler<Env>> = {
             recipientId: claim.data.volunteerId,
             kind: 'status_changed',
             title: `Session details updated: Grade ${session!.grade} · ${topicLabel(session!)}`,
-            body: [next.startTime ? `Starts ${next.startTime}` : '', next.room ? `Room ${next.room}` : '', next.arrivalNote].filter(Boolean).join(' · '),
+            body: [
+              next.startTime ? `Starts ${next.startTime}` : '',
+              next.room ? `Room ${next.room}` : '',
+              next.classLabel,
+              next.studentCount ? `${next.studentCount} students` : '',
+              ready.length ? `Ready: ${ready.length} of ${requested.size} items` : '',
+              next.arrivalNote,
+            ]
+              .filter(Boolean)
+              .join(' · '),
           })
         }
       }
       return ok({ sessionId, changed })
+    }),
+
+  // ── D11 · The volunteer tells the school what they need ───────────────────
+  requestEquipment: ({ userId, params, tools }) =>
+    run('requestEquipment', async () => {
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const claim = await activeClaimFor(tools, sessionId)
+      if (!claim || claim.data.volunteerId !== userId) refuse('Only the booked volunteer can say what they need.', 'forbidden')
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session || session.status === 'cancelled' || session.status === 'completed') refuse('This session can’t be changed.', 'stale_state')
+      const items = equipmentParam(params, 'items')
+      const other = str(params, 'other', { max: 200 })
+      const details = await getData<SessionDetails>(tools, 'session_details', sessionId)
+      // Items no longer requested drop out of "ready".
+      const ready = (details?.equipmentReady ?? []).filter((e) => items.includes(e as Equipment))
+      await must(tools.update('session_details', sessionId, { equipmentRequested: items, equipmentOther: other, equipmentReady: ready }), 'request equipment')
+      await audit(tools, { actorId: userId, action: 'request_equipment', targetType: 'session', targetId: sessionId, toState: [...items, other ? 'other' : ''].filter(Boolean).join(',') })
+      await notify(tools, {
+        recipientId: session!.teacherId,
+        kind: 'status_changed',
+        title: `Your volunteer listed what they need: Grade ${session!.grade} · ${topicLabel(session!)}`,
+        body: `${items.length} item${items.length === 1 ? '' : 's'}${other ? ` plus: ${other}` : ''}. Mark them ready in Session details.`,
+      })
+      return ok({ sessionId, items })
+    }),
+
+  // ── D11 · The program admin assigns each staff member to a school ─────────
+  assignStaffSchool: ({ userId, params, tools, env }) =>
+    run('assignStaffSchool', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const targetId = str(params, 'userId', { required: true, max: 100 })
+      if (!(await isStaff(tools, targetId, env.OWNER_USER_ID)) || isNonprofitAdmin(targetId, env.OWNER_USER_ID)) {
+        refuse('Only program staff can be assigned to a school.', 'invalid_input')
+      }
+      const schoolId = str(params, 'schoolId', { required: true, max: 100 })
+      const school = await getData<School>(tools, 'schools', schoolId)
+      if (!school || !school.active) refuse('Choose an active school.', 'invalid_input')
+      const before = await getData<{ schoolId?: string }>(tools, 'staff_schools', targetId)
+      await must(tools.create('staff_schools', { userId: targetId, schoolId, assignedBy: userId }, targetId), 'assign staff school')
+      await audit(tools, { actorId: userId, action: 'assign_staff_school', targetType: 'user', targetId, fromState: before?.schoolId ?? 'none', toState: schoolId })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You’re now the staff contact for ${school!.name}.` })
+      return ok({ userId: targetId, schoolId })
     }),
 
   // ── M7 + M8 · Claim a session, notify both sides ──────────────────────────
@@ -510,7 +603,9 @@ export const actions: Record<string, ActionHandler<Env>> = {
       if (!claim.success) refuse('Sorry, someone just claimed this one.', 'already_claimed')
 
       await must(tools.update('session_requests', sessionId, { status: 'claimed' }), 'mark claimed')
-      if (details) await must(tools.update('session_details', sessionId, { collaborators: [userId] }), 'share details')
+      const me = await getData<Profile>(tools, 'profiles', userId)
+      const volunteerName = me ? `${me.displayName}${me.profession ? `, ${me.profession}` : ''}` : ''
+      if (details) await must(tools.update('session_details', sessionId, { collaborators: [userId], volunteerName, equipmentRequested: [], equipmentReady: [], equipmentOther: '' }), 'share details')
       await audit(tools, { actorId: userId, action: 'claim', targetType: 'session', targetId: sessionId, fromState: 'open', toState: 'claimed' })
 
       const profile = await getData<Profile>(tools, 'profiles', userId)
@@ -568,7 +663,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
         'withdraw',
       )
       await must(tools.update('session_requests', sessionId, { status: 'open' }), 'reopen')
-      if (details) await must(tools.update('session_details', sessionId, { collaborators: [] }), 'unshare details')
+      if (details) await must(tools.update('session_details', sessionId, { collaborators: [], volunteerName: '', equipmentRequested: [], equipmentReady: [], equipmentOther: '' }), 'unshare details')
       await audit(tools, { actorId: userId, action: 'withdraw', targetType: 'session', targetId: sessionId, fromState: session!.status, toState: 'open' })
       await notify(tools, {
         recipientId: session!.teacherId,
@@ -618,8 +713,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const reason = str(params, 'reason', { max: 300 })
       const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
       if (!session) refuse('Session not found.', 'not_found')
-      const owner = session!.teacherId === userId && (await appRoleOf(tools, userId)) === 'teacher'
-      if (!owner && !(await isStaff(tools, userId, env.OWNER_USER_ID))) refuse('Only the session’s teacher or program staff can cancel it.', 'forbidden')
+      await requireSessionEditor(tools, userId, env.OWNER_USER_ID, session!)
       if (session!.status === 'cancelled' || session!.status === 'completed') refuse(`This session is already ${session!.status}.`, 'stale_state')
 
       await must(tools.update('session_requests', sessionId, { status: 'cancelled' }), 'cancel')

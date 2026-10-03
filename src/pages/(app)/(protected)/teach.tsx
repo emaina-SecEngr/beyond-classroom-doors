@@ -23,7 +23,7 @@ import {
   useToast,
 } from '@/components/ui'
 import { ErrorNote, Field, Loading, Page, Panel, Section } from '../../../components/Page'
-import { SessionDetailsModal, type EditableDetails } from '../../../components/SessionDetailsModal'
+import { SessionDetailsModal, toEditable, type EditableDetails } from '../../../components/SessionDetailsModal'
 import { callAction } from '../../../lib/actions'
 import {
   formatSessionDate,
@@ -56,6 +56,12 @@ interface DetailsRow {
   startTime: string
   arrivalNote: string
   teacherNote: string
+  classLabel?: string
+  studentCount?: number | null
+  volunteerName?: string
+  equipmentRequested?: string[]
+  equipmentOther?: string
+  equipmentReady?: string[]
 }
 
 const EMPTY_FORM = {
@@ -165,21 +171,22 @@ export default function TeachPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{label}</p>
-                    <p className="text-xs text-muted-foreground">{d?.room ? `Room ${d.room}` : 'No room set'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {[d?.room ? `Room ${d.room}` : 'No room set', d?.classLabel, d?.studentCount ? `${d.studentCount} students` : ''].filter(Boolean).join(' · ')}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {d?.volunteerName ? `Volunteer: ${d.volunteerName}` : 'No volunteer yet'}
+                      {(d?.equipmentRequested?.length ?? 0) > 0
+                        ? ` · Ready: ${(d?.equipmentReady ?? []).length} of ${d?.equipmentRequested?.length} items`
+                        : ''}
+                    </p>
                   </div>
                   <Badge variant={SESSION_STATUS_BADGE[r.data.status]}>{SESSION_STATUS_LABELS[r.data.status]}</Badge>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() =>
-                      setEditing({
-                        sessionId: r.recordId,
-                        label: `${label}, ${formatSessionDate(r.data.sessionDate)}`,
-                        room: d?.room ?? '',
-                        startTime: d?.startTime ?? '',
-                        arrivalNote: d?.arrivalNote ?? '',
-                        teacherNote: d?.teacherNote ?? '',
-                      })
+                      setEditing(toEditable(r.recordId, `${label}, ${formatSessionDate(r.data.sessionDate)}`, d))
                     }
                   >
                     Details

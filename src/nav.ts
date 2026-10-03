@@ -23,13 +23,13 @@ export interface NavItem {
 
 export const nav: NavItem[] = [
   { path: '/approvals', label: 'Approvals', roles: ['admin'], show: 'approvers' },
-  { path: '/home', label: 'Board' },
+  { path: '/home', label: 'Program board' },
   { path: '/my-sessions', label: 'My sessions', show: 'notProgramAdmin' },
   { path: '/inbox', label: 'Inbox', show: 'notProgramAdmin' },
   { path: '/apply', label: 'Profile', show: 'notProgramAdmin' },
   // Staff desk: program staff and the program admin (DeepSpace admin). The teacher
   // desk is an app role, so it's linked from the board instead.
-  { path: '/staff', label: 'Staff', roles: ['admin'] },
+  { path: '/staff', label: 'School', roles: ['admin'] },
   { path: '/settings', label: 'Settings' },
   // The /api-status debug page still exists — add
   // `{ path: '/api-status', label: 'API Status', devOnly: true }` to surface it.

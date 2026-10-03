@@ -12,10 +12,16 @@ import {
   ConfirmModal,
   Input,
   Modal,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Textarea,
   useToast,
 } from '@/components/ui'
 import { Field, Loading } from '../Page'
+import { useSchools } from '../../lib/schools'
 import { callAction } from '../../lib/actions'
 import { formatDay } from '../../lib/labels'
 import { useMe } from '../../lib/me'
@@ -43,6 +49,15 @@ export function ProgramStaff({ access }: { access: Access }) {
   const [helpReason, setHelpReason] = useState('')
   const [ending, setEnding] = useState<Person | null>(null)
   const [busy, setBusy] = useState(false)
+  const staffSchools = useQuery<{ userId: string; schoolId: string }>('staff_schools', { limit: 200 })
+  const { schools, byId: schoolById } = useSchools()
+  const schoolOf = new Map(staffSchools.records.map((r) => [r.data.userId, r.data.schoolId]))
+
+  async function assignSchool(p: Person, schoolId: string) {
+    const res = await callAction('assignStaffSchool', { userId: p.id, schoolId })
+    if (res.success) toast.success(`${p.name || p.email} now works with ${schoolById.get(schoolId)?.name ?? 'that school'}`)
+    else toast.error('Could not assign the school', res.error)
+  }
 
   const now = Date.now() / 1000
   const helpUntil = new Map(help.records.filter((r) => r.data.endsAt > now).map((r) => [r.data.userId, r.data.endsAt]))
@@ -107,7 +122,7 @@ export function ProgramStaff({ access }: { access: Access }) {
     <section className="mb-8">
       <h3 className="font-semibold">Program staff</h3>
       <p className="mt-1 text-sm text-muted-foreground">
-        Staff work with teachers so sessions are ready. Going away? Delegate approvals to a staff member for a set number of days; it ends on its own, and you can end it early. Only you can add or remove staff. Every change is recorded.
+        Staff work with one school’s teachers so sessions are ready — pick the school next to each staff member. Going away? Delegate approvals to a staff member for a set number of days; it ends on its own, and you can end it early. Only you can add or remove staff. Every change is recorded.
       </p>
       {others.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">No one else has signed in yet.</p>
@@ -122,6 +137,22 @@ export function ProgramStaff({ access }: { access: Access }) {
                   <p className="truncate text-xs text-muted-foreground">{p.email}</p>
                 </div>
                 {isStaff && <Badge variant="secondary">Program staff</Badge>}
+                {isStaff && (
+                  <Select value={schoolOf.get(p.id) ?? ''} onValueChange={(v) => v && void assignSchool(p, v)}>
+                    <SelectTrigger className="w-48" aria-label={`School for ${p.name || p.email}`}>
+                      <SelectValue placeholder="Assign a school" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {schools
+                        .filter((sc) => sc.active)
+                        .map((sc) => (
+                          <SelectItem key={sc.id} value={sc.id}>
+                            {sc.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 {isStaff && helpUntil.has(p.id) && <Badge variant="info">Approving until {formatDay(helpUntil.get(p.id) ?? null)}</Badge>}
                 {isStaff &&
                   (helpUntil.has(p.id) ? (

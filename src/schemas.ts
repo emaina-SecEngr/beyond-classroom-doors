@@ -13,6 +13,7 @@ import { changeRequestsSchema } from './schemas/change-requests-schema'
 import { vettingHelpSchema } from './schemas/vetting-help-schema'
 import { schoolsSchema } from './schemas/schools-schema'
 import { teacherInvitesSchema } from './schemas/teacher-invites-schema'
+import { staffSchoolsSchema } from './schemas/staff-schools-schema'
 
 /**
  * Every collection in the app. Baked in at deploy time; after first deploy, changes
@@ -33,4 +34,5 @@ export const schemas: CollectionSchema[] = [
   vettingHelpSchema,
   schoolsSchema,
   teacherInvitesSchema,
+  staffSchoolsSchema,
 ]

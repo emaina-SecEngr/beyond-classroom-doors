@@ -1,16 +1,19 @@
 /**
- * Staff desk — program staff (DeepSpace admins) only (M4, M9, SH7).
+ * School view — program staff and the program admin (M4, M9, SH7, D11).
  *
- *   Sessions         what each upcoming session still needs (staff's day job)
- *   Volunteers       everyone's status at a glance (read-only)
- *   Teachers         give or remove teacher access
- *   Change requests  late cancellations and reschedules from volunteers
+ * Staff see the one school the program admin assigned them to; the program admin
+ * can pick any school or see all of them. Every tab is filtered to that school:
+ *
+ *   Sessions         what each upcoming session still needs: volunteer, class,
+ *                    student count, room, start, arrival notes, items ready
+ *   Volunteers here  volunteers booked for this school's sessions
+ *   Teachers         this school's teachers; give or move teacher access
+ *   Change requests  late cancellations and reschedules for this school
  *   Audit log        every privileged action, append-only
  *
- * Approving volunteers, managing staff and delegating approvals live on the
- * Approvals page (/approvals) — the program admin's view (D3b, R6, R7).
- * Staff read these collections directly (admin read: true); every write is a
- * server action that re-checks on the server.
+ * Changes are enforced server-side: staff can only change sessions at their own
+ * school (requireSessionEditor). Reads are filtered here, not by the database —
+ * DeepSpace read rules can't be split per school (decision D11, known limitation).
  */
 import { useState } from 'react'
 import { useQuery, useUsers } from 'deepspace'
@@ -33,8 +36,8 @@ import {
 } from '@/components/ui'
 import { ErrorNote, Fact, Loading, Page } from '../../../components/Page'
 import { AuditLog } from '../../../components/admin/AuditLog'
-import type { Person, StatusRow } from '../../../components/admin/shared'
-import { SessionDetailsModal, type EditableDetails } from '../../../components/SessionDetailsModal'
+import { useAccess, type Person, type StatusRow } from '../../../components/admin/shared'
+import { SessionDetailsModal, toEditable, type EditableDetails } from '../../../components/SessionDetailsModal'
 import { callAction } from '../../../lib/actions'
 import {
   formatDay,
@@ -69,50 +72,102 @@ export default function StaffPage() {
   if (!me.ready) return <Loading />
   if (!me.isStaff) {
     return (
-      <Page title="Staff desk">
-        <EmptyState title="Program staff only" description="This desk is for the nonprofit’s program staff." />
+      <Page title="School view">
+        <EmptyState title="Program staff only" description="This view is for the nonprofit’s program staff." />
       </Page>
     )
   }
   return <StaffDesk />
 }
 
+const ALL = '__all__'
+
 function StaffDesk() {
+  const me = useMe()
+  const access = useAccess()
   const statuses = useQuery<StatusRow>('volunteer_status', { limit: 500 })
   const profiles = useQuery<ProfileRow>('profiles', { limit: 500 })
+  const mine = useQuery<{ userId: string; schoolId: string }>('staff_schools', { where: { userId: me.userId ?? '__none__' }, limit: 1 })
+  const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
+  const claims = useQuery<ClaimRow>('claims', { where: { status: 'active' }, limit: 500 })
+  const { schools, byId: schoolById } = useSchools()
   const { users, usersLoaded } = useUsers()
   const [params] = useSearchParams()
   const [tab, setTab] = useState<string | null>(null)
+  const [picked, setPicked] = useState<string | null>(null)
+
+  if (access === null || mine.status === 'loading') return <Loading />
 
   const profileById = new Map(profiles.records.map((r) => [r.data.userId, r.data]))
   const nameOf = (id: string) => profileById.get(id)?.displayName || users.find((u) => u.id === id)?.name || 'Unknown user'
 
+  // Which school this view shows (D11). Staff: their assigned school. Program admin: any, or all.
+  const assigned = mine.records[0]?.data.schoolId ?? null
+  const schoolId: string | null = access.nonprofitAdmin ? (picked ?? params.get('school') ?? ALL) : assigned
+  if (!access.nonprofitAdmin && !assigned) {
+    return (
+      <Page title="School view">
+        <EmptyState title="No school assigned yet" description="The program admin assigns each staff member to a school. Once that’s done, its sessions, teachers and volunteers appear here." />
+      </Page>
+    )
+  }
+  const scope = schoolId === ALL ? null : schoolId
+  const school = scope ? schoolById.get(scope) : undefined
+  const sessionSchool = new Map(sessions.records.map((r) => [r.recordId, r.data.schoolId ?? '']))
+  const inScope = (sessionId: string) => !scope || sessionSchool.get(sessionId) === scope
+  // Volunteers booked at this school's sessions.
+  const hereIds = new Set(claims.records.filter((c) => inScope(c.data.sessionId)).map((c) => c.data.volunteerId))
+  const volunteerRows = scope ? statuses.records.filter((r) => hereIds.has(r.data.userId)) : statuses.records
+
   return (
-    <Page title="Staff desk" intro="Work with teachers so every session is ready for its volunteer, and keep an eye on changes." wide>
+    <Page
+      title={school ? school.name : 'School view'}
+      intro={school ? [school.district, school.address, school.city].filter(Boolean).join(' · ') : 'Every school in the program. Pick one to focus on it.'}
+      actions={
+        access.nonprofitAdmin ? (
+          <Select value={schoolId ?? ALL} onValueChange={(v) => setPicked(v || ALL)}>
+            <SelectTrigger className="w-60" aria-label="School">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All schools</SelectItem>
+              {schools.map((sc) => (
+                <SelectItem key={sc.id} value={sc.id}>
+                  {sc.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : undefined
+      }
+      wide
+    >
       <Tabs value={tab ?? params.get('tab') ?? 'sessions'} onValueChange={(v) => setTab(String(v))}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          <TabsTrigger value="volunteers">Volunteers</TabsTrigger>
+          <TabsTrigger value="volunteers">{scope ? 'Volunteers here' : 'Volunteers'}</TabsTrigger>
           <TabsTrigger value="roles">Teachers</TabsTrigger>
           <TabsTrigger value="changes">Change requests</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sessions" className="pt-6">
-          <Sessions nameOf={nameOf} />
+          <Sessions nameOf={nameOf} scope={scope} />
         </TabsContent>
 
         <TabsContent value="volunteers" className="pt-6">
-          <p className="mb-4 text-sm text-muted-foreground">Volunteers are approved by the program admin, or by staff the admin has delegated to.</p>
+          <p className="mb-4 text-sm text-muted-foreground">
+            {scope ? 'Volunteers booked for sessions at this school.' : 'Everyone who has applied. Volunteers are approved by the program admin.'}
+          </p>
           {statuses.status === 'loading' ? (
             <Loading />
           ) : statuses.status === 'error' ? (
             <ErrorNote message={statuses.error || 'Could not load volunteers.'} />
-          ) : statuses.records.length === 0 ? (
-            <EmptyState title="No volunteers yet" description="People appear here once they submit a profile." />
+          ) : volunteerRows.length === 0 ? (
+            <EmptyState title={scope ? 'No volunteers booked here yet' : 'No volunteers yet'} description={scope ? 'Volunteers appear here once they claim a session at this school.' : 'People appear here once they submit a profile.'} />
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border bg-card">
-              {statuses.records.map((r) => (
+              {volunteerRows.map((r) => (
                 <li key={r.recordId} className="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-sm">
                   <span className="min-w-0 flex-1 font-medium">{nameOf(r.data.userId)}</span>
                   <span className="text-muted-foreground">{profileById.get(r.data.userId)?.profession || '—'}</span>
@@ -125,11 +180,11 @@ function StaffDesk() {
         </TabsContent>
 
         <TabsContent value="roles" className="pt-6">
-          {!usersLoaded ? <Loading /> : <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />}
+          {!usersLoaded ? <Loading /> : <Roles scope={scope} users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />}
         </TabsContent>
 
         <TabsContent value="changes" className="pt-6">
-          <ChangeRequests nameOf={nameOf} />
+          <ChangeRequests nameOf={nameOf} inScope={inScope} />
         </TabsContent>
 
         <TabsContent value="audit" className="pt-6">
@@ -142,7 +197,7 @@ function StaffDesk() {
 
 // ── People & roles ───────────────────────────────────────────────────────────
 
-function Roles({ users }: { users: Person[] }) {
+function Roles({ users, scope }: { users: Person[]; scope: string | null }) {
   const toast = useToast()
   const roles = useQuery<{ userId: string; role: AppRole; schoolId?: string }>('role_assignments', { limit: 500 })
   const { schools, byId: schoolById } = useSchools()
@@ -185,7 +240,14 @@ function Roles({ users }: { users: Person[] }) {
         </p>
       )}
       <ul className="divide-y divide-border rounded-md border border-border bg-card">
-        {users.map((p) => {
+        {users
+          .filter((p) => {
+            // In a school's view: its teachers, plus people with no role yet (to make them teachers here).
+            if (!scope) return true
+            const a = assignmentById.get(p.id)
+            return !a || a.schoolId === scope
+          })
+          .map((p) => {
           const a = assignmentById.get(p.id)
           const current = a?.role
           const school = a?.schoolId ? schoolById.get(a.schoolId) : undefined
@@ -211,7 +273,7 @@ function Roles({ users }: { users: Person[] }) {
                         <SelectValue placeholder={current === 'teacher' ? 'Move to school…' : 'Choose a school'} />
                       </SelectTrigger>
                       <SelectContent>
-                        {activeSchools.map((s) => (
+                        {activeSchools.filter((s) => !scope || s.id === scope).map((s) => (
                           <SelectItem key={s.id} value={s.id}>
                             {s.name}
                           </SelectItem>
@@ -271,6 +333,12 @@ interface DetailsRow {
   startTime: string
   arrivalNote: string
   teacherNote: string
+  classLabel?: string
+  studentCount?: number | null
+  volunteerName?: string
+  equipmentRequested?: string[]
+  equipmentOther?: string
+  equipmentReady?: string[]
 }
 interface ClaimRow {
   sessionId: string
@@ -287,10 +355,14 @@ function missingFor(s: SessionRow, d: DetailsRow | undefined, claim: ClaimRow | 
   if (!d?.room) out.push('No room')
   if (!d?.arrivalNote) out.push('No arrival instructions')
   if (!d?.startTime) out.push('No exact start time')
+  if (!d?.studentCount) out.push('No student count')
+  const asked = d?.equipmentRequested ?? []
+  const notReady = asked.filter((e) => !(d?.equipmentReady ?? []).includes(e)).length
+  if (notReady) out.push(`${notReady} item${notReady === 1 ? '' : 's'} not ready`)
   return s.status === 'cancelled' ? [] : out
 }
 
-function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
+function Sessions({ nameOf, scope }: { nameOf: (id: string) => string; scope: string | null }) {
   const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
   const { byId: schoolById } = useSchools()
   const details = useQuery<DetailsRow>('session_details', { limit: 500 })
@@ -305,6 +377,7 @@ function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
   const today = todaySeconds()
   const upcoming = sessions.records
     .filter((r) => r.data.sessionDate >= today && r.data.status !== 'cancelled' && r.data.status !== 'completed')
+    .filter((r) => !scope || r.data.schoolId === scope)
     .sort((a, b) => a.data.sessionDate - b.data.sessionDate)
 
   if (upcoming.length === 0) return <EmptyState title="No upcoming sessions" description="Sessions appear here as teachers post requests." />
@@ -331,7 +404,12 @@ function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
                     {schoolById.get(r.data.schoolId ?? '')?.name ?? 'School not set'} · {formatSessionDate(r.data.sessionDate)},{' '}
                     {sessionTimeText(r.data.timeBand, d?.startTime)} · Teacher: {nameOf(r.data.teacherId)}
                   </p>
-                  <p className="text-sm text-muted-foreground">Volunteer: {claim ? nameOf(claim.volunteerId) : '—'}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Volunteer: {claim ? d?.volunteerName || nameOf(claim.volunteerId) : '—'}
+                    {d?.classLabel ? ` · ${d.classLabel}` : ''}
+                    {d?.studentCount ? ` · ${d.studentCount} students` : ''}
+                    {(d?.equipmentRequested?.length ?? 0) > 0 ? ` · Items ready: ${(d?.equipmentReady ?? []).length} of ${d?.equipmentRequested?.length}` : ''}
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={SESSION_STATUS_BADGE[r.data.status]}>{SESSION_STATUS_LABELS[r.data.status]}</Badge>
@@ -340,14 +418,7 @@ function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
                     size="sm"
                     variant="outline"
                     onClick={() =>
-                      setEditing({
-                        sessionId: r.recordId,
-                        label: `${label}, ${formatSessionDate(r.data.sessionDate)}`,
-                        room: d?.room ?? '',
-                        startTime: d?.startTime ?? '',
-                        arrivalNote: d?.arrivalNote ?? '',
-                        teacherNote: d?.teacherNote ?? '',
-                      })
+                      setEditing(toEditable(r.recordId, `${label}, ${formatSessionDate(r.data.sessionDate)}`, d))
                     }
                   >
                     Details
@@ -374,11 +445,11 @@ function Sessions({ nameOf }: { nameOf: (id: string) => string }) {
 
 // ── Change requests ──────────────────────────────────────────────────────────
 
-function ChangeRequests({ nameOf }: { nameOf: (id: string) => string }) {
+function ChangeRequests({ nameOf, inScope }: { nameOf: (id: string) => string; inScope: (sessionId: string) => boolean }) {
   const { records, status, error } = useQuery<ChangeRow>('change_requests', { limit: 200 })
   if (status === 'loading') return <Loading />
   if (status === 'error') return <ErrorNote message={error || 'Could not load change requests.'} />
-  const rows = [...records].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const rows = records.filter((r) => inScope(r.data.sessionId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   if (rows.length === 0) return <EmptyState title="No change requests" description="Volunteers send these when it’s too late to withdraw themselves." />
   return (
     <>

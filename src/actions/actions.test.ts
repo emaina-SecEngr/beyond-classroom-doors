@@ -250,9 +250,11 @@ describe('who vets, and vetting help (decision R7, standing test 18)', () => {
 
 describe('session readiness — editing room / time / arrival notes', () => {
   const edit = (who: string, extra: Row = {}) => call('updateSessionDetails', who, { sessionId: S, room: '118', startTime: '10:00', arrivalNote: 'Front office', ...extra })
-  it('the owning teacher and staff can edit; another teacher and volunteers cannot', async () => {
+  it('the owning teacher and staff at that school can edit; another teacher and volunteers cannot', async () => {
     expect((await edit('u_teacher')).success).toBe(true)
     expect(row('session_details', S)?.room).toBe('118')
+    expect(await edit('u_staff', { room: '120' })).toMatchObject({ success: false, code: 'forbidden' }) // no school yet
+    await call('assignStaffSchool', OWNER, { userId: 'u_staff', schoolId: SCHOOL })
     expect((await edit('u_staff', { room: '120' })).success).toBe(true)
     expect(await edit('u_teacher2')).toMatchObject({ success: false, code: 'forbidden' })
     expect(await edit('u_vol')).toMatchObject({ success: false, code: 'forbidden' })
@@ -360,6 +362,57 @@ describe('teacher invites (D10, standing test 20)', () => {
     expect(rows('teacher_invites').length).toBe(1)
     expect(await invite(OWNER, { email: 'not-an-email' })).toMatchObject({ success: false, code: 'invalid_input' })
     expect(await invite(OWNER, { schoolId: 'nope' })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+})
+
+describe('school view and session prep (D11, standing test 21)', () => {
+  it('only the program admin assigns staff to a school, and only staff can be assigned', async () => {
+    expect(await call('assignStaffSchool', 'u_staff', { userId: 'u_staff', schoolId: SCHOOL })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('assignStaffSchool', OWNER, { userId: 'u_vol', schoolId: SCHOOL })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect((await call('assignStaffSchool', OWNER, { userId: 'u_staff', schoolId: SCHOOL })).success).toBe(true)
+    expect(row('staff_schools', 'u_staff')).toMatchObject({ schoolId: SCHOOL })
+  })
+  it('staff assigned to another school cannot change or cancel this school’s sessions', async () => {
+    const other = await call('createSchool', OWNER, { name: 'Hoover High' })
+    await call('assignStaffSchool', OWNER, { userId: 'u_staff', schoolId: (other as { data: { schoolId: string } }).data.schoolId })
+    expect(await call('updateSessionDetails', 'u_staff', { sessionId: S, room: '1' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('cancelSession', 'u_staff', { sessionId: S })).toMatchObject({ success: false, code: 'forbidden' })
+    expect((await call('cancelSession', OWNER, { sessionId: S })).success).toBe(true) // the program admin can, anywhere
+  })
+  it('claiming puts the volunteer’s name on the session for the teacher; withdrawing clears it', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect(row('session_details', S)?.volunteerName).toBe('u_vol, Nurse')
+    await call('withdrawClaim', 'u_vol', { sessionId: S })
+    expect(row('session_details', S)?.volunteerName).toBe('')
+  })
+  it('the booked volunteer lists what they need; the teacher is told; only known items are accepted', async () => {
+    expect(await call('requestEquipment', 'u_vol', { sessionId: S, items: ['projector'] })).toMatchObject({ success: false, code: 'forbidden' }) // not booked
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect(await call('requestEquipment', 'u_vol2', { sessionId: S, items: ['projector'] })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('requestEquipment', 'u_vol', { sessionId: S, items: ['flamethrower'] })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect((await call('requestEquipment', 'u_vol', { sessionId: S, items: ['projector', 'sharpies', 'projector'], other: 'Extension cord' })).success).toBe(true)
+    expect(row('session_details', S)).toMatchObject({ equipmentRequested: ['projector', 'sharpies'], equipmentOther: 'Extension cord' })
+    expect(rows('notifications').some((n) => n.recipientId === 'u_teacher' && String(n.title).includes('what they need'))).toBe(true)
+  })
+  it('the teacher records class and student count and marks requested items ready (only requested ones)', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    await call('requestEquipment', 'u_vol', { sessionId: S, items: ['projector', 'paper'] })
+    const r = await call('updateSessionDetails', 'u_teacher', {
+      sessionId: S, room: '214', classLabel: 'AP Biology, period 3', studentCount: 28, equipmentReady: ['projector', 'speakers'],
+    })
+    expect(r.success).toBe(true)
+    expect(row('session_details', S)).toMatchObject({ classLabel: 'AP Biology, period 3', studentCount: 28, equipmentReady: ['projector'] })
+    const note = rows('notifications').filter((n) => n.recipientId === 'u_vol').at(-1)
+    expect(note?.body).toContain('28 students')
+    expect(note?.body).toContain('Ready: 1 of 2 items')
+    expect(await call('updateSessionDetails', 'u_teacher', { sessionId: S, studentCount: 500 })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+  it('dropping an item from the request also drops it from "ready"', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    await call('requestEquipment', 'u_vol', { sessionId: S, items: ['projector', 'paper'] })
+    await call('updateSessionDetails', 'u_teacher', { sessionId: S, equipmentReady: ['projector', 'paper'] })
+    await call('requestEquipment', 'u_vol', { sessionId: S, items: ['paper'] })
+    expect(row('session_details', S)?.equipmentReady).toEqual(['paper'])
   })
 })
 

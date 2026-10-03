@@ -16,6 +16,15 @@ export const sessionDetailsSchema: CollectionSchema = {
     { name: 'startTime', storage: 'text', interpretation: 'plain' },
     { name: 'arrivalNote', storage: 'text', interpretation: 'plain' },
     { name: 'teacherNote', storage: 'text', interpretation: 'plain' },
+    // Session prep (D11). Teacher/staff: class, student count, which items are ready.
+    // Volunteer (claimant): which items they need. Volunteer name is copied in at claim
+    // time so the teacher can see who is coming (teachers can't read profiles).
+    { name: 'classLabel', storage: 'text', interpretation: 'plain' },
+    { name: 'studentCount', storage: 'number', interpretation: 'plain' },
+    { name: 'equipmentRequested', storage: 'text', interpretation: { kind: 'json' } },
+    { name: 'equipmentOther', storage: 'text', interpretation: 'plain' },
+    { name: 'equipmentReady', storage: 'text', interpretation: { kind: 'json' } },
+    { name: 'volunteerName', storage: 'text', interpretation: 'plain' },
     { name: 'collaborators', storage: 'text', interpretation: { kind: 'json' } },
   ],
   uniqueOn: ['sessionId'],

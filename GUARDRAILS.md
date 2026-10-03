@@ -244,6 +244,8 @@ Extend the scaffold's three specs; don't add parallel suites.
     a session's school is taken from the teacher's assignment, never from the request.
 20. A teacher invite is accepted only by the signed-in account whose verified email
     matches it; members can't read invites; a revoked invite never grants access.
+21. Staff can change or cancel sessions only at the school they're assigned to; only the
+    booked volunteer can list equipment; only requested items can be marked ready.
 
 ---
 

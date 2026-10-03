@@ -135,7 +135,7 @@ function LiveBoard({ me }: { me: Me }) {
 
   return (
     <Page
-      title="Session board"
+      title="Program board"
       intro="Open one-hour career sessions at the district’s schools. Claim one and the teacher is told right away."
       actions={<DeskLinks me={me} />}
       wide
@@ -205,7 +205,7 @@ function LiveBoard({ me }: { me: Me }) {
 function DeskLinks({ me }: { me: Me }) {
   const links: { to: string; label: string }[] = []
   if (me.appRole === 'teacher') links.push({ to: '/teach', label: 'Teacher desk' })
-  if (me.isStaff) links.push({ to: '/approvals', label: 'Approvals' }, { to: '/staff', label: 'Staff desk' })
+  if (me.isStaff) links.push({ to: '/approvals', label: 'Approvals' }, { to: '/staff', label: 'School view' })
   if (!me.appRole && !me.isStaff) links.push({ to: '/my-sessions', label: 'My sessions' })
   return (
     <>
