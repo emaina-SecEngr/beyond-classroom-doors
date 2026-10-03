@@ -51,7 +51,8 @@ check() {
   local severity="$1" ref="$2" name="$3" pattern="$4" flags="$5"; shift 5
   [ "$#" -eq 0 ] && return 0
   local out status
-  out=$(grep "$flags" --include='*.ts' --include='*.tsx' -e "$pattern" "$@" 2>&1)
+  # Test files never ship in the bundle, so they are exempt (they may import deepspace/worker).
+  out=$(grep "$flags" --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx' --exclude='*.spec.ts' -e "$pattern" "$@" 2>&1)
   status=$?
   if [ "$status" -eq 2 ]; then
     report HARD "$ref" "Check could not run: $name" "$out"
@@ -114,6 +115,22 @@ AUDIT_SCHEMA=src/schemas/audit-log-schema.ts
 if [ -f "$AUDIT_SCHEMA" ]; then
   check HARD "§1.10" "Audit log allows update or delete" \
     "(update|delete):\s*(true|'own'|\"own\")" -HnE "$AUDIT_SCHEMA"
+fi
+
+# ── §1.6 Integration proxy stays closed to the browser ──────────────────────
+# Regression guard for the Day 1 finding: the scaffold's catch-all
+# /api/integrations/:name/:endpoint route forwarded any integration for any
+# caller with the owner's JWT. It must keep the allowlist gate and require
+# sign-in for every call it does allow.
+HTTP_ROUTES=src/server/http-routes.ts
+if [ -f "$HTTP_ROUTES" ] && grep -q "/api/integrations/:name/:endpoint" "$HTTP_ROUTES"; then
+  if ! grep -qE "BROWSER_INTEGRATIONS\.has\(" "$HTTP_ROUTES"; then
+    report HARD "§1.6" "Integration catch-all route has no browser allowlist gate" "$HTTP_ROUTES"
+  fi
+  check HARD "§1.6" "Integration route lets anonymous callers through for developer billing" \
+    "if \(!auth && billingMode === 'user'\)" -HnE "$HTTP_ROUTES"
+  out=$(grep -nE "new Set<string>\(\[[^]]*['\"][^]]*\]\)" "$HTTP_ROUTES" | grep BROWSER_INTEGRATIONS || true)
+  [ -n "$out" ] && report ADVISORY "§1.6" "Browser integration allowlist is non-empty — confirm each entry is reviewed and rate-limited" "$out"
 fi
 
 # ── Advisory: patterns that usually mean a guardrail was missed ─────────────
