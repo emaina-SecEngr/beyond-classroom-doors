@@ -6,7 +6,7 @@
  *                    the admin has asked for help (time-boxed, R7)
  *   Volunteers       everyone's status at a glance
  *   People & roles   program staff (nonprofit admin only), teachers (staff),
- *                    board approvers (nonprofit admin only)
+ *                    (approval is one final decision, D3b)
  *   Change requests  late cancellations and reschedules from volunteers
  *   Audit log        every privileged action, append-only
  *
@@ -16,6 +16,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useQuery, useUsers } from 'deepspace'
+import { useSearchParams } from 'react-router-dom'
 import {
   Badge,
   Button,
@@ -24,11 +25,6 @@ import {
   EmptyState,
   Input,
   Modal,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Tabs,
   TabsContent,
   TabsList,
@@ -78,7 +74,8 @@ interface ChangeRow {
   status: 'open' | 'resolved'
 }
 
-const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher', board_member: 'Board approver' }
+const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher' }
+const roleLabel = (r: string) => ROLE_LABELS[r as AppRole] ?? 'Retired role'
 
 interface Access {
   nonprofitAdmin: boolean
@@ -105,6 +102,8 @@ function StaffDesk() {
   const profiles = useQuery<ProfileRow>('profiles', { limit: 500 })
   const { users, usersLoaded, setRole } = useUsers()
   const [access, setAccess] = useState<Access | null>(null)
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<string | null>(null)
 
   // Display only: the server re-checks every one of these on every action.
   useEffect(() => {
@@ -123,7 +122,10 @@ function StaffDesk() {
 
   return (
     <Page title="Staff desk" intro="Work with teachers so every session is ready for its volunteer, and keep an eye on changes." wide>
-      <Tabs defaultValue="sessions">
+      <Tabs
+        value={tab ?? params.get('tab') ?? (access?.canVet && queue.length > 0 ? 'applicants' : 'sessions')}
+        onValueChange={(v) => setTab(String(v))}
+      >
         <TabsList className="flex-wrap">
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="applicants">Applicants{queue.length ? ` (${queue.length})` : ''}</TabsTrigger>
@@ -172,7 +174,7 @@ function StaffDesk() {
           ) : (
             <>
               <ProgramStaff access={access} people={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} setRole={setRole} />
-              <Roles nonprofitAdmin={access.nonprofitAdmin} users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />
+              <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />
             </>
           )}
         </TabsContent>
@@ -213,12 +215,12 @@ function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
   if (queue.length === 0) return <EmptyState title="No one waiting" description="New volunteer applications appear here." />
 
   const notice = !access.canVet
-    ? 'Vetting is done by the nonprofit admin. You can see who’s waiting; the admin can ask you to help if they need to.'
+    ? 'Volunteers are reviewed and approved by the nonprofit admin. You can see who’s waiting; the admin can ask you to help.'
     : access.vettingHelpEndsAt
-      ? `The nonprofit admin asked you to help with vetting until ${formatInstant(access.vettingHelpEndsAt)}.`
+      ? `The nonprofit admin asked you to help review volunteers until ${formatInstant(access.vettingHelpEndsAt)}. Your decisions are final.`
       : null
 
-  async function decide(outcome: 'vetted' | 'rejected') {
+  async function decide(outcome: 'approved' | 'rejected') {
     if (!open) return
     setBusy(true)
     const res = await callAction('vetVolunteer', { userId: open.userId, outcome, ...form })
@@ -227,7 +229,7 @@ function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
       toast.error('That didn’t go through', res.error)
       return
     }
-    toast.success(outcome === 'vetted' ? 'Marked as vetted' : 'Application rejected', outcome === 'vetted' ? 'A board member gives the final approval.' : undefined)
+    toast.success(outcome === 'approved' ? 'Volunteer approved' : 'Application rejected', outcome === 'approved' ? 'They can claim sessions now. This decision is final.' : undefined)
     setOpen(null)
     setForm(EMPTY_VET)
   }
@@ -267,10 +269,10 @@ function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
 
       <Modal open={!!open} onClose={() => !busy && setOpen(null)} size="lg">
         <Modal.Header>
-          <Modal.Title>Vet {name}</Modal.Title>
+          <Modal.Title>Review {name}</Modal.Title>
           <Modal.Description>
             {open?.profile?.profession}
-            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked; the board sees a summary.
+            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked. Approving is final: they can claim sessions right away.
           </Modal.Description>
         </Modal.Header>
         <Modal.Body>
@@ -308,8 +310,8 @@ function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
           <Button variant="outline" onClick={() => void decide('rejected')} disabled={busy || !form.reason.trim()}>
             Reject
           </Button>
-          <Button onClick={() => void decide('vetted')} loading={busy} disabled={!form.identityConfirmed || !form.clearanceExpiresAt}>
-            Mark vetted
+          <Button onClick={() => void decide('approved')} loading={busy} disabled={!form.identityConfirmed || !form.clearanceExpiresAt}>
+            Approve volunteer
           </Button>
         </Modal.Footer>
       </Modal>
@@ -457,7 +459,7 @@ function ProgramStaff({ people, setRole, access }: { people: Person[]; setRole: 
         }
         description={
           confirming?.role === 'admin'
-            ? 'They’ll work with teachers on sessions, assign teacher roles, and read the audit log. They can’t vet unless you ask them to help, and staff can never give board approval.'
+            ? 'They’ll work with teachers on sessions, assign teacher roles, and read the audit log. They can’t review volunteers unless you ask them to help.'
             : 'They’ll lose the staff desk immediately.'
         }
         confirmText={confirming?.role === 'admin' ? 'Make staff' : 'Remove staff'}
@@ -466,7 +468,7 @@ function ProgramStaff({ people, setRole, access }: { people: Person[]; setRole: 
       <Modal open={!!asking} onClose={() => !busy && setAsking(null)} size="sm">
         <Modal.Header>
           <Modal.Title>Ask {asking?.name || asking?.email} to help vet?</Modal.Title>
-          <Modal.Description>They can vet volunteers until the help ends. The board still gives the final approval.</Modal.Description>
+          <Modal.Description>They can review, approve and reject volunteers until the help ends. Their decisions are final, like yours.</Modal.Description>
         </Modal.Header>
         <Modal.Body>
           <div className="space-y-4">
@@ -513,22 +515,20 @@ interface Person {
   platformRole: string
 }
 
-function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boolean }) {
+function Roles({ users }: { users: Person[] }) {
   const toast = useToast()
   const roles = useQuery<{ userId: string; role: AppRole }>('role_assignments', { limit: 500 })
-  const [choice, setChoice] = useState<Record<string, string>>({})
   const [removing, setRemoving] = useState<Person | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  const roleById = new Map(roles.records.map((r) => [r.data.userId, r.data.role]))
+  const roleById = new Map<string, string>(roles.records.map((r) => [r.data.userId, r.data.role]))
 
   async function assign(p: Person) {
-    const role = choice[p.id]
-    if (!role) return
+    const role: AppRole = 'teacher'
     setBusyId(p.id)
     const res = await callAction('assignRole', { userId: p.id, role })
     setBusyId(null)
-    if (res.success) toast.success(`${p.name || p.email} is now ${ROLE_LABELS[role as AppRole].toLowerCase()}`)
+    if (res.success) toast.success(`${p.name || p.email} is now a teacher`)
     else toast.error('Could not assign the role', res.error)
   }
 
@@ -548,11 +548,7 @@ function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boo
   return (
     <>
       <p className="mb-4 text-sm text-muted-foreground">
-        Give teacher access to the school’s teachers.{' '}
-        {nonprofitAdmin
-          ? 'As the nonprofit admin, you also seat the board member(s) who approve volunteers; board approvers can’t be program staff.'
-          : 'Board approvers are seated by the nonprofit admin.'}{' '}
-        Volunteers need no role.
+        Give teacher access to the school’s teachers. Volunteers need no role.
       </p>
       <ul className="divide-y divide-border rounded-md border border-border bg-card">
         {users.map((p) => {
@@ -564,21 +560,14 @@ function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boo
                 <p className="truncate text-xs text-muted-foreground">{p.email}</p>
               </div>
               {p.platformRole === 'admin' && <Badge variant="secondary">Program staff</Badge>}
-              {current && <Badge variant="info">{ROLE_LABELS[current]}</Badge>}
+              {current && <Badge variant="info">{roleLabel(current)}</Badge>}
               <div className="flex items-center gap-2">
-                <Select value={choice[p.id] ?? ''} onValueChange={(v) => setChoice((c) => ({ ...c, [p.id]: v }))}>
-                  <SelectTrigger className="w-48" aria-label={`Role for ${p.name || p.email}`}>
-                    <SelectValue placeholder="Choose a role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="teacher">Teacher</SelectItem>
-                    {nonprofitAdmin && p.platformRole !== 'admin' && <SelectItem value="board_member">Board approver</SelectItem>}
-                  </SelectContent>
-                </Select>
-                <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id} disabled={!choice[p.id] || choice[p.id] === current}>
-                  Assign
-                </Button>
-                {current && (current !== 'board_member' || nonprofitAdmin) && (
+                {current !== 'teacher' && (
+                  <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id}>
+                    Make teacher
+                  </Button>
+                )}
+                {current && (
                   <Button size="sm" variant="ghost" onClick={() => setRemoving(p)}>
                     Remove
                   </Button>

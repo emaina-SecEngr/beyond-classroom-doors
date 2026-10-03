@@ -13,6 +13,7 @@
  *   a museum admission wristband.
  * Signature: A split-flap board listing upcoming sessions
  *   ("11TH GRADE · NURSING · TUE").
+ * Approval: one final decision by the program admin (decisions D3b).
  * Hero: Four board rows flip in, 0.4s apart; at 3s, row two flips
  *   OPEN → CLAIMED; then the board stays still.
  *
@@ -35,12 +36,10 @@
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { PublicFooter, PublicHeader } from '../components/PublicChrome'
 import { Seo } from '../components/Seo'
 import { cn } from '../lib/utils'
-import { APP_NAME } from '../constants'
 import { seo } from '../seo'
-
-const PROGRAM_EMAIL = 'mainin2003@yahoo.com'
 
 const BOARD = [
   { day: 'TUE', time: '08:30', grade: '11TH', career: 'NURSING', status: 'open' },
@@ -57,13 +56,13 @@ const STEPS = [
   },
   {
     n: '02',
-    title: 'The nonprofit vets every volunteer.',
-    body: 'Identity checked, any professional license looked up, school clearance recorded: TB test and background check.',
+    title: 'The nonprofit checks every volunteer.',
+    body: 'Identity confirmed, any professional license looked up, school clearance recorded: TB screening and background check.',
   },
   {
     n: '03',
-    title: 'The board gives the second key.',
-    body: 'A board member who did not do the vetting approves. Nobody alone can put someone in a classroom.',
+    title: 'The program admin decides. That’s final.',
+    body: 'One accountable person approves or rejects. The decision is recorded with their name, and nobody can quietly change it.',
   },
   {
     n: '04',
@@ -154,31 +153,7 @@ export default function Landing() {
       <Seo {...seo} path="/" />
       <style>{FLAP_CSS}</style>
       <div data-testid="static-landing" className="min-h-screen bg-background text-foreground">
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <header className="border-b border-border">
-          <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
-            <Link to="/" className="font-display text-lg font-semibold">
-              {APP_NAME}
-            </Link>
-            <nav className="ml-auto hidden items-center gap-6 text-sm text-muted-foreground sm:flex">
-              <a href="#how" className="hover:text-foreground">
-                How it works
-              </a>
-              <a href="#who" className="hover:text-foreground">
-                Who it’s for
-              </a>
-              <a href="#support" className="hover:text-foreground">
-                Support
-              </a>
-            </nav>
-            <Link
-              to="/home"
-              className="ml-auto inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent sm:ml-0"
-            >
-              Sign in
-            </Link>
-          </div>
-        </header>
+        <PublicHeader />
 
         <main>
           {/* ── Hero ─────────────────────────────────────────────── */}
@@ -189,12 +164,12 @@ export default function Landing() {
                 Real careers walk into class, one hour at a time.
               </h1>
               <p className="mt-6 max-w-xl text-lg text-muted-foreground">
-                Nurses, electricians and engineers visit a high school classroom for an hour. Every volunteer is vetted, then approved by the
-                board.
+                Nurses, electricians and engineers visit a high school classroom for an hour. Every volunteer is checked and approved before
+                any visit.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link
-                  to="/apply"
+                  to="/volunteer"
                   className="inline-flex h-11 items-center rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
                 >
                   Volunteer your hour
@@ -211,7 +186,7 @@ export default function Landing() {
           <section id="how" className="border-t border-border bg-card">
             <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 md:py-20">
               <h2 className="font-display text-3xl font-semibold tracking-tight">How a session happens</h2>
-              <p className="mt-2 max-w-xl text-muted-foreground">Four steps. Two different people sign off before anyone enters a classroom.</p>
+              <p className="mt-2 max-w-xl text-muted-foreground">Four steps. Nobody enters a classroom before the program admin approves them.</p>
               <ol className="mt-10 divide-y divide-border border-y border-border">
                 {STEPS.map((s) => (
                   <li key={s.n} className="grid gap-2 py-6 md:grid-cols-[6rem_1fr_1.3fr] md:gap-8">
@@ -233,8 +208,8 @@ export default function Landing() {
                 <p className="mt-2 text-muted-foreground">
                   Give one hour to show students what your work is really like. Apply once; claim sessions that fit your week.
                 </p>
-                <Link to="/apply" className="mt-4 inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline">
-                  Apply to volunteer
+                <Link to="/volunteer" className="mt-4 inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline">
+                  How volunteering works
                 </Link>
               </div>
               <div>
@@ -266,8 +241,8 @@ export default function Landing() {
                 <dd className="mt-1 text-muted-foreground">Requests carry grade and class size only.</dd>
               </div>
               <div>
-                <dt className="font-semibold">Two keys</dt>
-                <dd className="mt-1 text-muted-foreground">The nonprofit vets; a separate board member approves.</dd>
+                <dt className="font-semibold">One accountable approver</dt>
+                <dd className="mt-1 text-muted-foreground">The program admin decides, and the decision is final.</dd>
               </div>
               <div>
                 <dt className="font-semibold">Clearance tracked</dt>
@@ -281,45 +256,7 @@ export default function Landing() {
           </section>
         </main>
 
-        {/* ── Footer ───────────────────────────────────────────── */}
-        <footer id="support" className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-          <div className="grid gap-8 md:grid-cols-[1.4fr_1fr_1fr]">
-            <div>
-              <p className="font-display text-lg font-semibold">{APP_NAME}</p>
-              <p className="mt-2 max-w-sm text-sm text-muted-foreground">A pilot with one San Diego high school.</p>
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold">Support the program</h2>
-              <p className="mt-2 text-sm text-muted-foreground">Donations aren’t taken online yet. Email to give or sponsor a school.</p>
-              <a
-                href={`mailto:${PROGRAM_EMAIL}?subject=${encodeURIComponent('Supporting Beyond Classroom Doors')}`}
-                className="mt-3 inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline"
-              >
-                {PROGRAM_EMAIL}
-              </a>
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold">In the app</h2>
-              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                <li>
-                  <Link to="/home" className="hover:text-foreground">
-                    Session board
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/apply" className="hover:text-foreground">
-                    Volunteer application
-                  </Link>
-                </li>
-                <li>
-                  <a href={`mailto:${PROGRAM_EMAIL}`} className="hover:text-foreground">
-                    Contact the program team
-                  </a>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </footer>
+        <PublicFooter />
       </div>
     </>
   )

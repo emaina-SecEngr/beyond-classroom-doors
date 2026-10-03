@@ -24,7 +24,7 @@ elif locale -a 2>/dev/null | grep -qiE '^en_US\.utf-?8$'; then
 fi
 
 targets=()
-for p in "src/pages/index.tsx" "src/pages/(app)/landing.tsx" "src/components/landing"; do
+for p in "src/pages/index.tsx" "src/pages/volunteer.tsx" "src/components/PublicChrome.tsx" "src/pages/(app)/landing.tsx" "src/components/landing"; do
   [ -e "$p" ] && targets+=("$p")
 done
 

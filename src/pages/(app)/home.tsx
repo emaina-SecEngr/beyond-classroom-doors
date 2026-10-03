@@ -4,13 +4,13 @@
  *
  * Signed out: a clearly labeled example board, with sign-in.
  * Signed in: the live board of open, upcoming sessions. Approved volunteers can
- * claim; everyone else sees why they can't yet. Teachers, board members and staff
+ * claim; everyone else sees why they can't yet. Teachers and staff
  * get a link to their desk.
  *
  * The board shows only what a request contains — grade, topic, date, time band,
  * class size. Room, exact time and arrival notes are shared after a claim.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { AuthOverlay, useQuery } from 'deepspace'
 import { Badge, Button, ConfirmModal, EmptyState, useToast } from '@/components/ui'
@@ -65,7 +65,7 @@ function SignedOutBoard() {
   return (
     <Page
       title="Session board"
-      intro="Teachers post one-hour career sessions. Vetted, approved volunteers claim them. Sign in to see the live board."
+      intro="Teachers post one-hour career sessions. Volunteers approved by the nonprofit claim them. Sign in to see the live board."
       actions={<Button onClick={() => setSignIn(true)}>Sign in</Button>}
     >
       <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Example — not real sessions</p>
@@ -112,6 +112,7 @@ function LiveBoard({ me }: { me: Me }) {
       actions={<DeskLinks me={me} />}
       wide
     >
+      {me.isStaff && <StaffWaiting />}
       <StatusBanner me={me} />
 
       {status === 'loading' && <Loading label="Loading sessions…" />}
@@ -152,7 +153,6 @@ function LiveBoard({ me }: { me: Me }) {
 function DeskLinks({ me }: { me: Me }) {
   const links: { to: string; label: string }[] = []
   if (me.appRole === 'teacher') links.push({ to: '/teach', label: 'Teacher desk' })
-  if (me.appRole === 'board_member') links.push({ to: '/approvals', label: 'Program Admin approvals' })
   if (me.isStaff) links.push({ to: '/staff', label: 'Staff desk' })
   if (!me.appRole && !me.isStaff) links.push({ to: '/my-sessions', label: 'My sessions' })
   return (
@@ -166,15 +166,59 @@ function DeskLinks({ me }: { me: Me }) {
   )
 }
 
+// ── Work waiting for you (shown on sign-in) ──────────────────────────────────
+// Display only: counts come from what the server lets this person read, and every
+// decision is re-checked by its server action.
+
+function WaitingBanner({ count, text, to, label }: { count: number; text: string; to: string; label: string }) {
+  if (count === 0) return null
+  return (
+    <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-accent p-4">
+      <p className="text-sm">
+        <span className="mr-2 inline-flex min-w-7 justify-center rounded-sm bg-primary px-1.5 py-0.5 text-sm font-semibold tabular-nums text-primary-foreground">{count}</span>
+        {text}
+      </p>
+      <Link to={to} className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+        {label}
+      </Link>
+    </div>
+  )
+}
+
+/** The nonprofit admin (or staff helping them) sees applications waiting for vetting. */
+function StaffWaiting() {
+  const statuses = useQuery<{ status: string }>('volunteer_status', { limit: 500 })
+  const [canVet, setCanVet] = useState(false)
+  useEffect(() => {
+    let live = true
+    void callAction<{ canVet: boolean }>('myAccess').then((r) => {
+      if (live) setCanVet(r.success && r.data.canVet)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  if (!canVet || statuses.status !== 'ready') return null
+  const n = statuses.records.filter((r) => r.data.status === 'applied' || r.data.status === 'renewal_pending').length
+  return (
+    <WaitingBanner
+      count={n}
+      text={n === 1 ? 'volunteer application is waiting for your decision.' : 'volunteer applications are waiting for your decision.'}
+      to="/staff?tab=applicants"
+      label="Review applications"
+    />
+  )
+}
+
 function StatusBanner({ me }: { me: Me }) {
-  // Teachers, board members and staff use the board to look, not to claim.
+  // Teachers and staff use the board to look, not to claim.
   if (me.appRole || me.isStaff) return null
 
   let text: string
   let action: { to: string; label: string } | null = null
   const v = me.volunteer
   if (!v) {
-    text = 'Want to speak to a class? Tell us about your work. The nonprofit vets every volunteer, then the Program Admin approves.'
+    text = 'Want to speak to a class? Tell us about your work. The nonprofit checks and approves every volunteer.'
     action = { to: '/apply', label: 'Volunteer' }
   } else if (v.status === 'approved' && !me.canClaim) {
     text = 'Your clearance has expired, so you can’t claim new sessions. Contact the program team to renew.'

@@ -167,25 +167,18 @@ export const actions: Record<string, ActionHandler<Env>> = {
       return ok({ status: status.status })
     }),
 
-  // ── M4 · Staff assign app roles ───────────────────────────────────────────
+  // ── M4 · Staff assign app roles (teacher) ─────────────────────────────────
   assignRole: ({ userId, params, tools, env }) =>
     run('assignRole', async () => {
       await requireStaff(tools, userId, env.OWNER_USER_ID)
       const targetId = str(params, 'userId', { required: true, max: 100 })
       const role = oneOf(params, 'role', APP_ROLES)
-      // R7: the board seat (second key) is the nonprofit admin's call; staff assign teachers.
-      if (role === 'board_member') requireNonprofitAdmin(userId, env.OWNER_USER_ID)
       const target = await getData(tools, 'users', targetId)
       if (!target) refuse('That user has not signed in yet.', 'not_found')
-      // Separation of duties at assignment time too: whoever can vet (staff, the
-      // nonprofit admin) must never hold the second key, not even as an unusable seat.
-      if (role === 'board_member' && (await isStaff(tools, targetId, env.OWNER_USER_ID))) {
-        refuse('Program staff and the nonprofit admin can’t be board approvers — the board key must be someone else.', 'forbidden')
-      }
       const previous = await appRoleOf(tools, targetId)
       await must(tools.create('role_assignments', { userId: targetId, role, assignedBy: userId }, targetId), 'assign role')
       await audit(tools, { actorId: userId, action: 'assign_role', targetType: 'user', targetId, fromState: previous ?? 'none', toState: role })
-      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You now have ${role === 'teacher' ? 'teacher' : 'board approver'} access.` })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: 'You now have teacher access.' })
       return ok({ userId: targetId, role })
     }),
 
@@ -193,40 +186,42 @@ export const actions: Record<string, ActionHandler<Env>> = {
     run('removeRole', async () => {
       await requireStaff(tools, userId, env.OWNER_USER_ID)
       const targetId = str(params, 'userId', { required: true, max: 100 })
-      const previous = await appRoleOf(tools, targetId)
-      if (!previous) refuse('That user has no app role.', 'not_found')
-      if (previous === 'board_member') requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      // Read the raw row: a retired role (e.g. the old board seat, D3b) can still be removed.
+      const row = await getData<{ role?: string }>(tools, 'role_assignments', targetId)
+      if (!row) refuse('That user has no app role.', 'not_found')
       await must(tools.remove('role_assignments', targetId), 'remove role')
-      await audit(tools, { actorId: userId, action: 'remove_role', targetType: 'user', targetId, fromState: previous ?? '', toState: 'none' })
+      await audit(tools, { actorId: userId, action: 'remove_role', targetType: 'user', targetId, fromState: row!.role ?? '', toState: 'none' })
       return ok({ userId: targetId })
     }),
 
-  // ── M2 · The nonprofit admin vets volunteers (first key, R7) ──────────────
+  // ── M2 · The nonprofit admin vets AND approves — one final decision (D3b) ──
   vetVolunteer: ({ userId, params, tools, env }) =>
     run('vetVolunteer', async () => {
-      // R7: the nonprofit admin vets; staff only while the admin has asked them to help.
+      // R7: the nonprofit admin decides; staff only while the admin has asked them to help.
       await requireCanVet(tools, userId, env.OWNER_USER_ID)
       const targetId = str(params, 'userId', { required: true, max: 100 })
-      const outcome = oneOf(params, 'outcome', ['vetted', 'rejected'] as const)
+      const outcome = oneOf(params, 'outcome', ['approved', 'rejected'] as const)
       const reason = str(params, 'reason', { max: 500 })
 
       const current = await statusOf(tools, targetId)
       if (!current) refuse('No application found for that volunteer.', 'not_found')
-      // M2-AC4: stale-click protection — only an open application can be decided.
-      if (current!.status !== 'applied' && current!.status !== 'renewal_pending') {
-        refuse(`This application is already ${current!.status}. Refresh and try again.`, 'stale_state')
+      // D3b: the decision is final. Only an open application can be decided; an approved
+      // or rejected volunteer can't be re-decided by anyone. ('vetted' = left over from
+      // the retired two-key flow, still waiting for a decision.)
+      if (!['applied', 'renewal_pending', 'vetted'].includes(current!.status)) {
+        refuse(`This application was already decided (${current!.status}). That decision is final.`, 'stale_state')
       }
 
       if (outcome === 'rejected') {
         if (!reason) refuse('A reason is required to reject.', 'invalid_input')
-        await must(tools.update('volunteer_status', targetId, { status: 'rejected', decisionReason: reason, vettedBy: userId }), 'reject')
+        await must(tools.update('volunteer_status', targetId, { status: 'rejected', decisionReason: reason, vettedBy: userId, approvedBy: userId }), 'reject')
       } else {
-        if (!bool(params, 'identityConfirmed')) refuse('Confirm identity before vetting.', 'invalid_input')
+        if (!bool(params, 'identityConfirmed')) refuse('Confirm identity before approving.', 'invalid_input')
         const clearanceExpiresAt = dateParam(params, 'clearanceExpiresAt', { required: true })!
         if (clearanceExpiresAt <= nowSeconds()) refuse('Clearance expiry must be in the future.', 'invalid_input')
         await must(
           tools.update('volunteer_status', targetId, {
-            status: 'vetted',
+            status: 'approved',
             identityConfirmed: true,
             qualificationType: str(params, 'qualificationType', { max: 80 }),
             licenseNumber: str(params, 'licenseNumber', { max: 40 }),
@@ -235,66 +230,17 @@ export const actions: Record<string, ActionHandler<Env>> = {
             clearanceExpiresAt,
             decisionReason: reason,
             vettedBy: userId,
+            approvedBy: userId,
           }),
-          'vet',
+          'approve',
         )
       }
-      await audit(tools, { actorId: userId, action: 'vet', targetType: 'volunteer', targetId, fromState: current!.status, toState: outcome, reason })
+      await audit(tools, { actorId: userId, action: outcome === 'approved' ? 'approve' : 'reject', targetType: 'volunteer', targetId, fromState: current!.status, toState: outcome, reason })
       await notify(tools, {
         recipientId: targetId,
         kind: 'status_changed',
-        title: outcome === 'vetted' ? 'Your vetting is complete. The board reviews next.' : 'Your application was not approved.',
+        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'Your application was not approved.',
         body: outcome === 'rejected' ? reason : '',
-      })
-      return ok({ userId: targetId, status: outcome })
-    }),
-
-  // ── M3 · A board member approves (second key, decision D3a) ───────────────
-  listVettedVolunteers: ({ userId, tools }) =>
-    run('listVettedVolunteers', async () => {
-      await requireAppRole(tools, userId, 'board_member')
-      const r = await tools.query<Record<string, unknown>>('volunteer_status', { where: { status: 'vetted' }, limit: 100 })
-      if (!r.success) refuse('Could not load volunteers.', 'internal_error')
-      const out = []
-      for (const rec of r.success ? r.data.records : []) {
-        const s = rec.data
-        const p = await getData<Profile>(tools, 'profiles', String(s.userId))
-        // Vetting SUMMARY only — no raw records, no emails (M3-AC1).
-        out.push({
-          userId: s.userId,
-          displayName: p?.displayName ?? 'Unknown',
-          profession: p?.profession ?? '',
-          employer: p?.employer ?? '',
-          qualificationType: s.qualificationType ?? '',
-          clearanceExpiresAt: s.clearanceExpiresAt ?? null,
-        })
-      }
-      return ok({ volunteers: out })
-    }),
-
-  approveVolunteer: ({ userId, params, tools, env }) =>
-    run('approveVolunteer', async () => {
-      await requireAppRole(tools, userId, 'board_member')
-      // Separation of duties (M3-AC3): the staff key and the board key must be different people.
-      if (await isStaff(tools, userId, env.OWNER_USER_ID)) refuse('Staff cannot give the board approval.', 'forbidden')
-      const targetId = str(params, 'userId', { required: true, max: 100 })
-      const outcome = oneOf(params, 'outcome', ['approved', 'declined'] as const)
-      const reason = str(params, 'reason', { max: 500 })
-
-      const current = await statusOf(tools, targetId)
-      if (!current) refuse('No application found for that volunteer.', 'not_found')
-      if (current!.status !== 'vetted') refuse(`This volunteer is ${current!.status}, not awaiting board approval.`, 'stale_state')
-      if (outcome === 'declined' && !reason) refuse('A reason is required to decline.', 'invalid_input')
-      if (outcome === 'approved' && !((current!.clearanceExpiresAt ?? 0) > nowSeconds())) {
-        refuse('This volunteer’s clearance has expired.', 'clearance_expired')
-      }
-      await must(tools.update('volunteer_status', targetId, { status: outcome, decisionReason: reason, approvedBy: userId }), 'approve')
-      await audit(tools, { actorId: userId, action: 'approve', targetType: 'volunteer', targetId, fromState: 'vetted', toState: outcome, reason })
-      await notify(tools, {
-        recipientId: targetId,
-        kind: 'status_changed',
-        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'The board did not approve your application.',
-        body: outcome === 'declined' ? reason : '',
       })
       return ok({ userId: targetId, status: outcome })
     }),

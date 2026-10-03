@@ -87,7 +87,7 @@ on the user's behalf.
    `integration.post` for email or AI. The browser sends intent ("claim session X");
    the server decides recipients, content, and prompts.
 7. **Paid calls are bounded by design.** Confirmation emails and the AI brief run only
-   inside `claimSession` (one claim per session via `uniqueOn`). The board
+   inside `claimSession` (one claim per session via `uniqueOn`). The admin
    broadcast is capped at once per day (checked against the audit log).
 8. **Secrets:** never commit `.dev.vars`, `~/.deepspace/*`, or `.claude/launch.json`.
    Never log or return `callerJwt`/tokens. Never put tokens in URLs or `localStorage`.
@@ -222,7 +222,7 @@ Extend the scaffold's three specs; don't add parallel suites.
 4. A forged `volunteerId` in the request body is ignored.
 5. A user cannot change their own role or status (UI **and** raw `clientBuild.put`).
 6. Teacher A cannot edit teacher B's request.
-7. A board member cannot vet; staff cannot perform the board approval.
+7. Only the nonprofit admin (or staff during an active help request) approves or rejects a volunteer, and the decision is final: no one can re-decide an approved or rejected volunteer.
 8. A new sign-up's user directory contains only themselves.
 9. Action responses contain no emails or tokens.
 10. Members cannot trigger or pause cron tasks (`read_only`).
@@ -237,9 +237,9 @@ Extend the scaffold's three specs; don't add parallel suites.
 17. Only the nonprofit admin can grant or remove staff; another staff member's
     set-role message is refused and audited; the owner's own access can't be changed;
     no role values other than admin/member.
-18. Staff can vet only during an active help request from the nonprofit admin (ended
-    or expired help, or losing staff status, stops it); only the nonprofit admin grants
-    help or seats board approvers.
+18. Staff can decide on volunteers only during an active help request from the nonprofit
+    admin (ended or expired help, or losing staff status, stops it); only the nonprofit
+    admin grants help.
 
 ---
 
