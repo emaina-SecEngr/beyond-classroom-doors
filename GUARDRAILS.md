@@ -246,6 +246,9 @@ Extend the scaffold's three specs; don't add parallel suites.
     matches it; members can't read invites; a revoked invite never grants access.
 21. Staff can change or cancel sessions only at the school they're assigned to; only the
     booked volunteer can list equipment; only requested items can be marked ready.
+22. A license file opens only for its volunteer or an approver (program admin / delegated
+    staff); it is fetched from that volunteer's private space only; approver views are
+    audited; uploads are PDF/JPG/PNG up to 5 MB.
 
 ---
 

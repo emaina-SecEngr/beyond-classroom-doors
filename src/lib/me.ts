@@ -13,6 +13,12 @@ export interface ProfileRow {
   displayName: string
   profession: string
   employer: string
+  skills?: string
+  yearsExperience?: number | null
+  hobbies?: string
+  licenseType?: string
+  licenseNumber?: string
+  licenseState?: string
 }
 
 export interface VolunteerStatusRow {

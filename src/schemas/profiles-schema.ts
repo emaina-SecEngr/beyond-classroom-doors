@@ -15,6 +15,14 @@ export const profilesSchema: CollectionSchema = {
     { name: 'displayName', storage: 'text', interpretation: 'plain', required: true },
     { name: 'profession', storage: 'text', interpretation: 'plain', required: true },
     { name: 'employer', storage: 'text', interpretation: 'plain' },
+    // D12: richer volunteer profile. Read only by the volunteer and staff.
+    { name: 'skills', storage: 'text', interpretation: 'plain' },
+    { name: 'yearsExperience', storage: 'number', interpretation: 'plain' },
+    { name: 'hobbies', storage: 'text', interpretation: 'plain' },
+    // License the volunteer reports; the program admin verifies it on the state's public lookup.
+    { name: 'licenseType', storage: 'text', interpretation: 'plain' },
+    { name: 'licenseNumber', storage: 'text', interpretation: 'plain' },
+    { name: 'licenseState', storage: 'text', interpretation: 'plain' },
   ],
   uniqueOn: ['userId'],
   ownerField: 'userId',

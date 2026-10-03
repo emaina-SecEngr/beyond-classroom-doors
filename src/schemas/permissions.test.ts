@@ -178,3 +178,16 @@ describe('staff_schools (D11)', () => {
     expect(canRead(s, 'member', rec({ userId: STAFF }), VOL)).toBe(false)
   })
 })
+
+describe('license_files (D12)', () => {
+  const s = S.license_files
+  it('a member reads only their own license files; nobody writes them directly', () => {
+    expect(canRead(s, 'member', rec({ volunteerId: VOL }), VOL)).toBe(true)
+    expect(canRead(s, 'member', rec({ volunteerId: VOL }), OTHER)).toBe(false)
+    for (const role of ['member', 'admin'] as const) {
+      expect(canCreate(s, role)).toBe(false)
+      expect(canUpdate(s, role, rec({ volunteerId: VOL }), VOL)).toBe(false)
+      expect(canDelete(s, role, rec({ volunteerId: VOL }), VOL)).toBe(false)
+    }
+  })
+})

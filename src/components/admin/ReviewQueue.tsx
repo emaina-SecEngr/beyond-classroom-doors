@@ -14,7 +14,8 @@ import {
   Textarea,
   useToast,
 } from '@/components/ui'
-import { Field } from '../Page'
+import { Fact, Field } from '../Page'
+import { LicenseFileList } from '../LicenseFiles'
 import { callAction } from '../../lib/actions'
 import { formatInstant, todayInSanDiego, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import type { ProfileRow } from '../../lib/me'
@@ -74,6 +75,7 @@ export function ReviewQueue({ queue, access }: { queue: Applicant[]; access: Acc
               <p className="text-sm text-muted-foreground">
                 {a.profile?.profession || '—'}
                 {a.profile?.employer ? ` · ${a.profile.employer}` : ''}
+                {a.profile?.yearsExperience != null ? ` · ${a.profile.yearsExperience} yrs` : ''}
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -82,7 +84,13 @@ export function ReviewQueue({ queue, access }: { queue: Applicant[]; access: Acc
                 <Button
                   size="sm"
                   onClick={() => {
-                    setForm(EMPTY_VET)
+                    // Pre-fill what the volunteer reported; the approver confirms it.
+                    const p = a.profile
+                    setForm({
+                      ...EMPTY_VET,
+                      qualificationType: [p?.licenseType, p?.licenseState].filter(Boolean).join(', '),
+                      licenseNumber: p?.licenseNumber ?? '',
+                    })
                     setOpen(a)
                   }}
                 >
@@ -103,6 +111,25 @@ export function ReviewQueue({ queue, access }: { queue: Applicant[]; access: Acc
           </Modal.Description>
         </Modal.Header>
         <Modal.Body>
+          {open && (
+            <div className="mb-5 space-y-3 rounded-md border border-border bg-muted p-4 text-sm">
+              <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                <Fact label="Company">{open.profile?.employer || '—'}</Fact>
+                <Fact label="Experience">{open.profile?.yearsExperience != null ? `${open.profile.yearsExperience} years` : '—'}</Fact>
+                <Fact label="Skills">{open.profile?.skills || '—'}</Fact>
+                <Fact label="Hobbies">{open.profile?.hobbies || '—'}</Fact>
+                <Fact label="License (reported)">
+                  {open.profile?.licenseNumber
+                    ? `${open.profile.licenseType || 'License'} ${open.profile.licenseNumber}${open.profile.licenseState ? ` · ${open.profile.licenseState}` : ''}`
+                    : 'None reported'}
+                </Fact>
+              </dl>
+              <div>
+                <p className="mb-1 font-medium">License documents</p>
+                <LicenseFileList volunteerId={open.userId} />
+              </div>
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="flex items-start gap-3 text-sm sm:col-span-2">
               <Checkbox checked={form.identityConfirmed} onCheckedChange={(c) => set('identityConfirmed', c)} />

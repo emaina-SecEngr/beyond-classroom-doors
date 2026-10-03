@@ -103,7 +103,9 @@ export function ApprovedVolunteers({ nameOf }: { nameOf: (id: string) => string 
                       <p className="text-xs text-muted-foreground">
                         {r.profile?.profession || '—'}
                         {r.profile?.employer ? ` · ${r.profile.employer}` : ''}
+                        {r.profile?.yearsExperience != null ? ` · ${r.profile.yearsExperience} yrs` : ''}
                       </p>
+                      {r.profile?.skills ? <p className="text-xs text-muted-foreground">Skills: {r.profile.skills}</p> : null}
                     </td>
                     <td className="px-4 py-3">
                       {r.qualificationType || '—'}

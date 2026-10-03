@@ -8,7 +8,20 @@
  * the fake — actions run RBAC-off in production too — so every refusal here comes
  * from the action's own WHO / WHETHER checks.
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The platform file fetch is faked: it records whose private file space was read.
+const fetched: { ownerId: string; path: string }[] = []
+vi.mock('../server/user-files', async (orig) => {
+  const real = await orig<typeof import('../server/user-files')>()
+  return {
+    ...real,
+    fetchUserFile: async (_env: unknown, ownerId: string, path: string) => {
+      fetched.push({ ownerId, path })
+      return real.isFilePath(path) ? { bytes: new Uint8Array([37, 80, 68, 70]), mime: 'application/pdf' } : null
+    },
+  }
+})
 import type { ActionResult, ActionTools } from 'deepspace/worker'
 import { actions } from './index'
 import { schemas } from '../schemas'
@@ -413,6 +426,64 @@ describe('school view and session prep (D11, standing test 21)', () => {
     await call('updateSessionDetails', 'u_teacher', { sessionId: S, equipmentReady: ['projector', 'paper'] })
     await call('requestEquipment', 'u_vol', { sessionId: S, items: ['paper'] })
     expect(row('session_details', S)?.equipmentReady).toEqual(['paper'])
+  })
+})
+
+describe('richer profile and license documents (D12, standing test 22)', () => {
+  const add = (who: string, extra: Row = {}) =>
+    call('addLicenseFile', who, { path: `/api/files/self/${who}/rn-license.pdf`, name: 'RN license.pdf', mime: 'application/pdf', size: 120000, ...extra })
+  const fileIdOf = (r: unknown) => (r as { data: { fileId: string } }).data.fileId
+
+  it('saves skills, years of experience, hobbies and license details', async () => {
+    const r = await call('saveProfile', 'u_applicant', {
+      displayName: 'Ana', profession: 'Nurse', employer: 'Hospital', skills: 'ER triage, Spanish', yearsExperience: 12, hobbies: 'Surfing',
+      licenseType: 'Registered Nurse', licenseNumber: 'RN95123', licenseState: 'ca',
+    })
+    expect(r.success).toBe(true)
+    expect(row('profiles', 'u_applicant')).toMatchObject({ skills: 'ER triage, Spanish', yearsExperience: 12, hobbies: 'Surfing', licenseState: 'CA' })
+    expect(await call('saveProfile', 'u_applicant', { displayName: 'Ana', profession: 'Nurse', licenseState: 'California' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('saveProfile', 'u_applicant', { displayName: 'Ana', profession: 'Nurse', yearsExperience: 300 })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+  it('changing license details after approval sends the volunteer back for review; hobbies do not', async () => {
+    await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', hobbies: 'Chess' })
+    expect(row('volunteer_status', 'u_vol')?.status).toBe('approved')
+    await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', licenseNumber: 'RN1' })
+    expect(row('volunteer_status', 'u_vol')?.status).toBe('applied')
+  })
+  it('a volunteer registers their own upload; bad locations, types and sizes are refused', async () => {
+    expect((await add('u_applicant')).success).toBe(true)
+    expect(rows('license_files')[0]).toMatchObject({ volunteerId: 'u_applicant', removed: false })
+    expect(await add('u_applicant', { path: 'https://evil.example/x.pdf' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await add('u_applicant', { path: '/api/files/../secrets' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await add('u_applicant', { mime: 'text/html' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await add('u_applicant', { size: 6 * 1024 * 1024 })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+  it('the program admin can open it; it is fetched from the VOLUNTEER’s space; the view is logged', async () => {
+    fetched.length = 0
+    const id = fileIdOf(await add('u_applicant'))
+    const r = await call('openLicenseFile', OWNER, { fileId: id })
+    expect(r).toMatchObject({ success: true, data: { name: 'RN license.pdf', mime: 'application/pdf' } })
+    expect(fetched).toEqual([{ ownerId: 'u_applicant', path: '/api/files/self/u_applicant/rn-license.pdf' }])
+    expect(rows('audit_log').some((a) => a.action === 'view_license_file' && a.actorId === OWNER && a.targetId === 'u_applicant')).toBe(true)
+  })
+  it('other volunteers, teachers and staff without delegation cannot open it', async () => {
+    const id = fileIdOf(await add('u_applicant'))
+    for (const who of ['u_vol', 'u_teacher', 'u_staff']) {
+      expect(await call('openLicenseFile', who, { fileId: id })).toMatchObject({ success: false, code: 'forbidden' })
+    }
+    await call('grantVettingHelp', OWNER, { userId: 'u_staff', days: 3, reason: 'Covering' })
+    expect((await call('openLicenseFile', 'u_staff', { fileId: id })).success).toBe(true)
+  })
+  it('a volunteer can open and remove their own file; removed files cannot be opened; others cannot remove it', async () => {
+    const id = fileIdOf(await add('u_applicant'))
+    expect((await call('openLicenseFile', 'u_applicant', { fileId: id })).success).toBe(true)
+    expect(await call('removeLicenseFile', 'u_vol', { fileId: id })).toMatchObject({ success: false, code: 'not_found' })
+    expect((await call('removeLicenseFile', 'u_applicant', { fileId: id })).success).toBe(true)
+    expect(await call('openLicenseFile', OWNER, { fileId: id })).toMatchObject({ success: false, code: 'not_found' })
+  })
+  it('at most 5 live files per volunteer', async () => {
+    for (let i = 0; i < 5; i++) expect((await add('u_applicant', { path: `/api/files/self/u_applicant/f${i}.pdf` })).success).toBe(true)
+    expect(await add('u_applicant', { path: '/api/files/self/u_applicant/f6.pdf' })).toMatchObject({ success: false, code: 'too_many' })
   })
 })
 

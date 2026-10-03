@@ -14,6 +14,7 @@ import { vettingHelpSchema } from './schemas/vetting-help-schema'
 import { schoolsSchema } from './schemas/schools-schema'
 import { teacherInvitesSchema } from './schemas/teacher-invites-schema'
 import { staffSchoolsSchema } from './schemas/staff-schools-schema'
+import { licenseFilesSchema } from './schemas/license-files-schema'
 
 /**
  * Every collection in the app. Baked in at deploy time; after first deploy, changes
@@ -35,4 +36,5 @@ export const schemas: CollectionSchema[] = [
   schoolsSchema,
   teacherInvitesSchema,
   staffSchoolsSchema,
+  licenseFilesSchema,
 ]

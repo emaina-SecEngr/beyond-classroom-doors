@@ -53,12 +53,19 @@ import {
   statusOf,
   str,
 } from './lib'
+import { fetchUserFile, isFilePath, LICENSE_MAX_BYTES, LICENSE_MIMES, toBase64 } from '../server/user-files'
 
 interface Profile extends Record<string, unknown> {
   userId: string
   displayName: string
   profession: string
   employer: string
+  skills?: string
+  yearsExperience?: number | null
+  hobbies?: string
+  licenseType?: string
+  licenseNumber?: string
+  licenseState?: string
 }
 interface School extends Record<string, unknown> {
   name: string
@@ -196,9 +203,19 @@ export const actions: Record<string, ActionHandler<Env>> = {
       const displayName = str(params, 'displayName', { required: true, max: 80 })
       const profession = str(params, 'profession', { required: true, max: 80 })
       const employer = str(params, 'employer', { max: 120 })
+      // D12: richer profile and self-reported license details.
+      const extra = {
+        skills: str(params, 'skills', { max: 300 }),
+        yearsExperience: int(params, 'yearsExperience', { min: 0, max: 70 }),
+        hobbies: str(params, 'hobbies', { max: 300 }),
+        licenseType: str(params, 'licenseType', { max: 80 }),
+        licenseNumber: str(params, 'licenseNumber', { max: 40 }),
+        licenseState: str(params, 'licenseState', { max: 2 }).toUpperCase(),
+      }
+      if (extra.licenseState && !/^[A-Z]{2}$/.test(extra.licenseState)) refuse('License state must be a two-letter code, like CA.', 'invalid_input')
 
       const before = await getData<Profile>(tools, 'profiles', userId)
-      await must(tools.create('profiles', { userId, displayName, profession, employer }, userId), 'save profile')
+      await must(tools.create('profiles', { userId, displayName, profession, employer, ...extra }, userId), 'save profile')
 
       const status = await statusOf(tools, userId)
       if (!status) {
@@ -208,9 +225,15 @@ export const actions: Record<string, ActionHandler<Env>> = {
       }
 
       // M1-AC4: changing what was vetted sends the volunteer back for review.
-      const changed = before && (before.profession !== profession || before.employer !== employer)
+      const changed =
+        before &&
+        (before.profession !== profession ||
+          before.employer !== employer ||
+          (before.licenseType ?? '') !== extra.licenseType ||
+          (before.licenseNumber ?? '') !== extra.licenseNumber ||
+          (before.licenseState ?? '') !== extra.licenseState)
       if (changed && status.status !== 'applied') {
-        await must(tools.update('volunteer_status', userId, { status: 'applied', decisionReason: 'Profile changed after vetting' }), 'reset status')
+        await must(tools.update('volunteer_status', userId, { status: 'applied', decisionReason: 'Profile changed after approval' }), 'reset status')
         await audit(tools, {
           actorId: userId,
           action: 'status_reset',
@@ -218,7 +241,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
           targetId: userId,
           fromState: status.status,
           toState: 'applied',
-          reason: 'Profession or employer changed after vetting',
+          reason: 'Profession, employer or license changed after approval',
         })
         return ok({ status: 'applied', reset: true })
       }
@@ -334,6 +357,50 @@ export const actions: Record<string, ActionHandler<Env>> = {
       if (!school || !school.active) return ok({ accepted: false })
       await acceptInvite(tools, userId, invite.recordId, invite.data, school.name)
       return ok({ accepted: true, schoolName: school.name })
+    }),
+
+  // ── D12 · License documents: volunteer uploads, approvers open ────────────
+  addLicenseFile: ({ userId, params, tools }) =>
+    run('addLicenseFile', async () => {
+      const path = str(params, 'path', { required: true, max: 400 })
+      if (!isFilePath(path)) refuse('That file location isn’t valid.', 'invalid_input')
+      const name = str(params, 'name', { required: true, max: 120 })
+      const mime = oneOf(params, 'mime', LICENSE_MIMES)
+      const size = int(params, 'size', { required: true, min: 1, max: LICENSE_MAX_BYTES })!
+      const mine = await tools.query<{ removed?: boolean }>('license_files', { where: { volunteerId: userId }, limit: 50 })
+      const live = mine.success ? mine.data.records.filter((r) => !r.data.removed).length : 0
+      if (live >= 5) refuse('You can keep up to 5 license files. Remove one first.', 'too_many')
+      // volunteerId is the caller (from the token). The file is fetched later as this
+      // volunteer, so a row can only ever point at their own private files.
+      const created = await must(tools.create('license_files', { volunteerId: userId, path, name, mime, size, removed: false }), 'add license file')
+      await audit(tools, { actorId: userId, action: 'add_license_file', targetType: 'volunteer', targetId: userId, toState: name })
+      return ok({ fileId: created.recordId })
+    }),
+
+  removeLicenseFile: ({ userId, params, tools }) =>
+    run('removeLicenseFile', async () => {
+      const fileId = str(params, 'fileId', { required: true, max: 100 })
+      const row = await getData<{ volunteerId: string; removed?: boolean; name: string }>(tools, 'license_files', fileId)
+      if (!row || row.volunteerId !== userId) refuse('File not found.', 'not_found')
+      if (row!.removed) return ok({ fileId })
+      await must(tools.update('license_files', fileId, { removed: true }), 'remove license file')
+      await audit(tools, { actorId: userId, action: 'remove_license_file', targetType: 'volunteer', targetId: userId, fromState: row!.name })
+      return ok({ fileId })
+    }),
+
+  /** Return a license file's bytes to the volunteer themselves or to someone who may decide on volunteers. */
+  openLicenseFile: ({ userId, params, tools, env }) =>
+    run('openLicenseFile', async () => {
+      const fileId = str(params, 'fileId', { required: true, max: 100 })
+      const row = await getData<{ volunteerId: string; path: string; name: string; mime: string; removed?: boolean }>(tools, 'license_files', fileId)
+      if (!row || row.removed) refuse('File not found.', 'not_found')
+      if (row!.volunteerId !== userId) await requireCanVet(tools, userId, env.OWNER_USER_ID)
+      const file = await fetchUserFile(env as never, row!.volunteerId, row!.path)
+      if (!file) refuse('Couldn’t open that file. Ask the volunteer to upload it again.', 'fetch_failed')
+      if (row!.volunteerId !== userId) {
+        await audit(tools, { actorId: userId, action: 'view_license_file', targetType: 'volunteer', targetId: row!.volunteerId, toState: row!.name })
+      }
+      return ok({ name: row!.name, mime: row!.mime, base64: toBase64(file!.bytes) })
     }),
 
   // ── M4 · Staff assign app roles (teacher) ─────────────────────────────────
