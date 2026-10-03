@@ -19,6 +19,11 @@ export const profilesSchema: CollectionSchema = {
     { name: 'skills', storage: 'text', interpretation: 'plain' },
     { name: 'yearsExperience', storage: 'number', interpretation: 'plain' },
     { name: 'hobbies', storage: 'text', interpretation: 'plain' },
+    // D13: optional phone, shared only with the teacher of a session they're booked for.
+    { name: 'phone', storage: 'text', interpretation: 'plain' },
+    // D14: what would help the volunteer on the day (step-free route, parking...). Optional,
+    // never a diagnosis; copied only to sessions they book, for that teacher and staff.
+    { name: 'accessNeeds', storage: 'text', interpretation: 'plain' },
     // License the volunteer reports; the program admin verifies it on the state's public lookup.
     { name: 'licenseType', storage: 'text', interpretation: 'plain' },
     { name: 'licenseNumber', storage: 'text', interpretation: 'plain' },

@@ -16,6 +16,8 @@ export interface ProfileRow {
   skills?: string
   yearsExperience?: number | null
   hobbies?: string
+  phone?: string
+  accessNeeds?: string
   licenseType?: string
   licenseNumber?: string
   licenseState?: string

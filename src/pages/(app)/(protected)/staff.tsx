@@ -38,6 +38,8 @@ import { ErrorNote, Fact, Loading, Page } from '../../../components/Page'
 import { AuditLog } from '../../../components/admin/AuditLog'
 import { useAccess, type Person, type StatusRow } from '../../../components/admin/shared'
 import { SessionDetailsModal, toEditable, type EditableDetails } from '../../../components/SessionDetailsModal'
+import { BookedSessionTools } from '../../../components/BookedSessionTools'
+import { AssignVolunteerButton } from '../../../components/admin/AssignVolunteer'
 import { callAction } from '../../../lib/actions'
 import {
   formatDay,
@@ -152,7 +154,7 @@ function StaffDesk() {
         </TabsList>
 
         <TabsContent value="sessions" className="pt-6">
-          <Sessions nameOf={nameOf} scope={scope} />
+          <Sessions nameOf={nameOf} scope={scope} viewerId={me.userId} isAdmin={access.nonprofitAdmin} />
         </TabsContent>
 
         <TabsContent value="volunteers" className="pt-6">
@@ -339,6 +341,14 @@ interface DetailsRow {
   equipmentRequested?: string[]
   equipmentOther?: string
   equipmentReady?: string[]
+  volunteerEmail?: string
+  volunteerPhone?: string
+  accessNeeds?: string
+  readyAt?: number | null
+  proposedDate?: number | null
+  proposedTimeBand?: string
+  proposedBy?: string
+  proposedNote?: string
 }
 interface ClaimRow {
   sessionId: string
@@ -352,6 +362,8 @@ function missingFor(s: SessionRow, d: DetailsRow | undefined, claim: ClaimRow | 
   const out: string[] = []
   if (!claim) out.push('No volunteer yet')
   else if (!claim.confirmedAt) out.push('Volunteer hasn’t confirmed')
+  if (claim && !d?.readyAt) out.push('Teacher hasn’t marked the class ready')
+  if (d?.proposedDate) out.push('New date proposed')
   if (!d?.room) out.push('No room')
   if (!d?.arrivalNote) out.push('No arrival instructions')
   if (!d?.startTime) out.push('No exact start time')
@@ -362,7 +374,7 @@ function missingFor(s: SessionRow, d: DetailsRow | undefined, claim: ClaimRow | 
   return s.status === 'cancelled' ? [] : out
 }
 
-function Sessions({ nameOf, scope }: { nameOf: (id: string) => string; scope: string | null }) {
+function Sessions({ nameOf, scope, viewerId, isAdmin }: { nameOf: (id: string) => string; scope: string | null; viewerId: string | null; isAdmin: boolean }) {
   const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
   const { byId: schoolById } = useSchools()
   const details = useQuery<DetailsRow>('session_details', { limit: 500 })
@@ -423,7 +435,11 @@ function Sessions({ nameOf, scope }: { nameOf: (id: string) => string; scope: st
                   >
                     Details
                   </Button>
+                  {isAdmin && r.data.status === 'open' && <AssignVolunteerButton sessionId={r.recordId} label={`${label}, ${formatSessionDate(r.data.sessionDate)}`} />}
                 </div>
+              </div>
+              <div className="mt-3 flex">
+                <BookedSessionTools sessionId={r.recordId} label={label} status={r.data.status} details={d} viewerId={viewerId} />
               </div>
               {missing.length > 0 && (
                 <ul className="mt-3 flex flex-wrap gap-2 text-xs">

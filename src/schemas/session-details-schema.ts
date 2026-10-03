@@ -25,6 +25,20 @@ export const sessionDetailsSchema: CollectionSchema = {
     { name: 'equipmentOther', storage: 'text', interpretation: 'plain' },
     { name: 'equipmentReady', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'volunteerName', storage: 'text', interpretation: 'plain' },
+    // D13: contact between the booked volunteer and the teacher. This row is readable
+    // only by the teacher (owner), the booked volunteer (collaborator) and staff.
+    { name: 'volunteerEmail', storage: 'text', interpretation: 'plain' },
+    { name: 'volunteerPhone', storage: 'text', interpretation: 'plain' },
+    { name: 'teacherEmail', storage: 'text', interpretation: 'plain' },
+    { name: 'teacherName', storage: 'text', interpretation: 'plain' },
+    // D14: the booked volunteer's access needs for this visit (private row).
+    { name: 'accessNeeds', storage: 'text', interpretation: 'plain' },
+    // D13: the teacher confirms the class is ready; either side can propose a new date.
+    { name: 'readyAt', storage: 'number', interpretation: { kind: 'datetime' } },
+    { name: 'proposedDate', storage: 'number', interpretation: { kind: 'date' } },
+    { name: 'proposedTimeBand', storage: 'text', interpretation: 'plain' },
+    { name: 'proposedBy', storage: 'text', interpretation: 'plain' },
+    { name: 'proposedNote', storage: 'text', interpretation: 'plain' },
     { name: 'collaborators', storage: 'text', interpretation: { kind: 'json' } },
   ],
   uniqueOn: ['sessionId'],

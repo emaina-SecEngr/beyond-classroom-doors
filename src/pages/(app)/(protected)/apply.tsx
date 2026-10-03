@@ -30,7 +30,7 @@ export default function ApplyPage() {
   const [profession, setProfession] = useState('')
   const [employer, setEmployer] = useState('')
   // D12: richer profile and license details.
-  const [extra, setExtra] = useState({ skills: '', yearsExperience: '', hobbies: '', licenseType: '', licenseNumber: '', licenseState: '' })
+  const [extra, setExtra] = useState({ skills: '', yearsExperience: '', hobbies: '', phone: '', accessNeeds: '', licenseType: '', licenseNumber: '', licenseState: '' })
   const setX = (k: keyof typeof extra, v: string) => setExtra((x) => ({ ...x, [k]: v }))
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -46,6 +46,8 @@ export default function ApplyPage() {
       skills: p?.skills ?? '',
       yearsExperience: p?.yearsExperience != null ? String(p.yearsExperience) : '',
       hobbies: p?.hobbies ?? '',
+      phone: p?.phone ?? '',
+      accessNeeds: p?.accessNeeds ?? '',
       licenseType: p?.licenseType ?? '',
       licenseNumber: p?.licenseNumber ?? '',
       licenseState: p?.licenseState ?? '',
@@ -141,6 +143,20 @@ export default function ApplyPage() {
             </Field>
             <Field label="Hobbies (optional)" htmlFor="hobbies" hint="Students love the person behind the job.">
               <Input id="hobbies" value={extra.hobbies} onChange={(e) => setX('hobbies', e.target.value)} maxLength={300} />
+            </Field>
+            <Field
+              label="Phone (optional)"
+              htmlFor="phone"
+              hint="Shared, with your email, only with the teacher of a session you’re booked for, so they can reach you. Never shown to students."
+            >
+              <Input id="phone" type="tel" value={extra.phone} onChange={(e) => setX('phone', e.target.value)} maxLength={20} autoComplete="tel" />
+            </Field>
+            <Field
+              label="Anything that would help you on the day? (optional)"
+              htmlFor="access"
+              hint="For example: a step-free route, parking close to the entrance, a chair at the front. No need to say why. Shared only with the teacher and school staff for sessions you book."
+            >
+              <Textarea id="access" rows={2} value={extra.accessNeeds} onChange={(e) => setX('accessNeeds', e.target.value)} maxLength={300} />
             </Field>
 
             <fieldset className="space-y-4 rounded-md border border-border p-4">

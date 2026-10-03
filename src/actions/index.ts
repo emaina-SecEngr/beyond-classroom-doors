@@ -63,6 +63,8 @@ interface Profile extends Record<string, unknown> {
   skills?: string
   yearsExperience?: number | null
   hobbies?: string
+  phone?: string
+  accessNeeds?: string
   licenseType?: string
   licenseNumber?: string
   licenseState?: string
@@ -145,6 +147,91 @@ function equipmentParam(params: Record<string, unknown>, key: string): Equipment
   return [...out]
 }
 
+/**
+ * Book a volunteer onto a session — shared by claimSession (the volunteer) and
+ * assignVolunteer (the program admin, D13). Same checks either way: the VOLUNTEER
+ * must be approved with an unexpired clearance; the session open and in the future;
+ * exactly one active claim (uniqueOn race gate). Copies the contact details the
+ * teacher and volunteer need onto the private session_details row.
+ */
+async function bookSession(tools: Parameters<ActionHandler>[0]['tools'], volunteerId: string, sessionId: string, actorId: string): Promise<string> {
+  const byAdmin = actorId !== volunteerId
+  const status = await statusOf(tools, volunteerId)
+  if (status?.status !== 'approved') refuse(byAdmin ? 'That volunteer isn’t approved.' : 'Only approved volunteers can claim sessions.', 'not_approved')
+  if (!((status!.clearanceExpiresAt ?? 0) > nowSeconds())) {
+    refuse(byAdmin ? 'That volunteer’s clearance has expired.' : 'Your clearance has expired. Contact the program team.', 'clearance_expired')
+  }
+  const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+  if (!session) refuse('Session not found.', 'not_found')
+  if (session!.status !== 'open') refuse('Sorry, someone just claimed this one.', 'already_claimed')
+  const details = await getData<SessionDetails>(tools, 'session_details', sessionId)
+  const start = sessionStartSeconds(session!.sessionDate, session!.timeBand, details?.startTime)
+  if (start <= nowSeconds()) refuse('This session has already started.', 'in_past')
+
+  // The race gate: uniqueOn(activeSlot) lets exactly one active claim exist (M7-AC3).
+  const claim = await tools.create('claims', {
+    sessionId,
+    volunteerId,
+    status: 'active',
+    activeSlot: sessionId,
+    confirmedAt: null,
+    collaborators: [session!.teacherId],
+  })
+  if (!claim.success) refuse('Sorry, someone just claimed this one.', 'already_claimed')
+  await must(tools.update('session_requests', sessionId, { status: 'claimed' }), 'mark claimed')
+
+  const profile = await getData<Profile>(tools, 'profiles', volunteerId)
+  const volunteerUser = await getData<{ email?: string }>(tools, 'users', volunteerId)
+  const teacherUser = await getData<{ email?: string; name?: string }>(tools, 'users', session!.teacherId)
+  const volunteerName = profile ? `${profile.displayName}${profile.profession ? `, ${profile.profession}` : ''}` : ''
+  if (details) {
+    await must(
+      tools.update('session_details', sessionId, {
+        collaborators: [volunteerId],
+        volunteerName,
+        // D13: contact shared only with this booking's teacher (row is private to them, the volunteer and staff).
+        volunteerEmail: volunteerUser?.email ?? '',
+        volunteerPhone: profile?.phone ?? '',
+        accessNeeds: profile?.accessNeeds ?? '',
+        teacherEmail: teacherUser?.email ?? '',
+        teacherName: teacherUser?.name ?? '',
+        equipmentRequested: [],
+        equipmentReady: [],
+        equipmentOther: '',
+        readyAt: null,
+        proposedDate: null,
+        proposedTimeBand: '',
+        proposedBy: '',
+        proposedNote: '',
+      }),
+      'share details',
+    )
+  }
+  await audit(tools, { actorId, action: byAdmin ? 'assign_volunteer' : 'claim', targetType: 'session', targetId: sessionId, fromState: 'open', toState: `claimed by ${volunteerId}` })
+
+  const label = `Grade ${session!.grade} · ${topicLabel(session!)}`
+  const when = `${formatDate(session!.sessionDate)}, ${details?.startTime || session!.timeBand}`
+  const school = session!.schoolId ? await getData<School>(tools, 'schools', session!.schoolId) : null
+  const place = [school?.name, school?.address, details?.room ? `Room ${details.room}` : ''].filter(Boolean).join(', ')
+  await notify(tools, {
+    recipientId: volunteerId,
+    kind: 'claim_confirmed',
+    title: `${byAdmin ? 'The program booked you' : 'You’re booked'}: ${label}${school ? ` at ${school.name}` : ''}`,
+    body: [when, place, teacherUser?.name ? `Teacher: ${teacherUser.name}` : '', byAdmin ? 'Please confirm you’re available in My sessions.' : details?.arrivalNote ?? '']
+      .filter(Boolean)
+      .join(' · '),
+    link: calendarLink({ title: `Career session: ${label}`, startSeconds: start, location: place || undefined }),
+  })
+  await notify(tools, {
+    recipientId: session!.teacherId,
+    kind: 'session_claimed',
+    title: `Volunteer booked: ${label}`,
+    // D14: say there ARE access needs, never what they are, in a notification.
+    body: `${profile?.displayName ?? 'A volunteer'}${profile?.profession ? `, ${profile.profession}` : ''} · ${when}.${profile?.accessNeeds ? ' They’ve noted access needs — see session details.' : ''} Contact them from your teacher desk.`,
+  })
+  return (claim as { data: { recordId: string } }).data.recordId
+}
+
 /** Turn a pending invite into teacher access at its school (D10). */
 async function acceptInvite(
   tools: Parameters<ActionHandler>[0]['tools'],
@@ -208,11 +295,14 @@ export const actions: Record<string, ActionHandler<Env>> = {
         skills: str(params, 'skills', { max: 300 }),
         yearsExperience: int(params, 'yearsExperience', { min: 0, max: 70 }),
         hobbies: str(params, 'hobbies', { max: 300 }),
+        phone: str(params, 'phone', { max: 20 }),
+        accessNeeds: str(params, 'accessNeeds', { max: 300 }),
         licenseType: str(params, 'licenseType', { max: 80 }),
         licenseNumber: str(params, 'licenseNumber', { max: 40 }),
         licenseState: str(params, 'licenseState', { max: 2 }).toUpperCase(),
       }
       if (extra.licenseState && !/^[A-Z]{2}$/.test(extra.licenseState)) refuse('License state must be a two-letter code, like CA.', 'invalid_input')
+      if (extra.phone && !/^[0-9+()\-.\s]{7,20}$/.test(extra.phone)) refuse('Phone number can use digits, spaces and + ( ) - only.', 'invalid_input')
 
       const before = await getData<Profile>(tools, 'profiles', userId)
       await must(tools.create('profiles', { userId, displayName, profession, employer, ...extra }, userId), 'save profile')
@@ -609,16 +699,21 @@ export const actions: Record<string, ActionHandler<Env>> = {
       if (!session || session.status === 'cancelled' || session.status === 'completed') refuse('This session can’t be changed.', 'stale_state')
       const items = equipmentParam(params, 'items')
       const other = str(params, 'other', { max: 200 })
+      // D14: access needs for this visit (sent with the checklist; omit to leave unchanged).
+      const access = params.accessNeeds === undefined ? undefined : str(params, 'accessNeeds', { max: 300 })
       const details = await getData<SessionDetails>(tools, 'session_details', sessionId)
       // Items no longer requested drop out of "ready".
       const ready = (details?.equipmentReady ?? []).filter((e) => items.includes(e as Equipment))
-      await must(tools.update('session_details', sessionId, { equipmentRequested: items, equipmentOther: other, equipmentReady: ready }), 'request equipment')
+      await must(
+        tools.update('session_details', sessionId, { equipmentRequested: items, equipmentOther: other, equipmentReady: ready, ...(access === undefined ? {} : { accessNeeds: access }) }),
+        'request equipment',
+      )
       await audit(tools, { actorId: userId, action: 'request_equipment', targetType: 'session', targetId: sessionId, toState: [...items, other ? 'other' : ''].filter(Boolean).join(',') })
       await notify(tools, {
         recipientId: session!.teacherId,
         kind: 'status_changed',
         title: `Your volunteer listed what they need: Grade ${session!.grade} · ${topicLabel(session!)}`,
-        body: `${items.length} item${items.length === 1 ? '' : 's'}${other ? ` plus: ${other}` : ''}. Mark them ready in Session details.`,
+        body: `${items.length} item${items.length === 1 ? '' : 's'}${other ? ` plus: ${other}` : ''}.${access ? ' Access needs noted.' : ''} Mark them ready in Session details.`,
       })
       return ok({ sessionId, items })
     }),
@@ -644,56 +739,114 @@ export const actions: Record<string, ActionHandler<Env>> = {
   // ── M7 + M8 · Claim a session, notify both sides ──────────────────────────
   claimSession: ({ userId, params, tools }) =>
     run('claimSession', async () => {
-      // WHO: an approved volunteer with an unexpired clearance (M7-AC2). Identity from ctx only (AC4).
-      const status = await statusOf(tools, userId)
-      if (status?.status !== 'approved') refuse('Only approved volunteers can claim sessions.', 'not_approved')
-      if (!((status!.clearanceExpiresAt ?? 0) > nowSeconds())) refuse('Your clearance has expired. Contact the program team.', 'clearance_expired')
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const claimId = await bookSession(tools, userId, sessionId, userId)
+      return ok({ claimId, sessionId })
+    }),
 
-      // WHETHER: the session exists, is open and still in the future.
+  // ── D13 · The teacher confirms the class is ready for the session date ───
+  markClassReady: ({ userId, params, tools, env }) =>
+    run('markClassReady', async () => {
       const sessionId = str(params, 'sessionId', { required: true, max: 100 })
       const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
       if (!session) refuse('Session not found.', 'not_found')
-      if (session!.status !== 'open') refuse('Sorry, someone just claimed this one.', 'already_claimed')
+      await requireSessionEditor(tools, userId, env.OWNER_USER_ID, session!)
+      if (session!.status !== 'claimed' && session!.status !== 'confirmed') refuse('Book a volunteer before marking the class ready.', 'stale_state')
+      const claim = await activeClaimFor(tools, sessionId)
+      if (!claim) refuse('No volunteer is booked.', 'stale_state')
       const details = await getData<SessionDetails>(tools, 'session_details', sessionId)
-      const start = sessionStartSeconds(session!.sessionDate, session!.timeBand, details?.startTime)
-      if (start <= nowSeconds()) refuse('This session has already started.', 'in_past')
-
-      // The race gate: uniqueOn(activeSlot) lets exactly one active claim exist (M7-AC3).
-      const claim = await tools.create('claims', {
-        sessionId,
-        volunteerId: userId,
-        status: 'active',
-        activeSlot: sessionId,
-        confirmedAt: null,
-        collaborators: [session!.teacherId],
-      })
-      if (!claim.success) refuse('Sorry, someone just claimed this one.', 'already_claimed')
-
-      await must(tools.update('session_requests', sessionId, { status: 'claimed' }), 'mark claimed')
-      const me = await getData<Profile>(tools, 'profiles', userId)
-      const volunteerName = me ? `${me.displayName}${me.profession ? `, ${me.profession}` : ''}` : ''
-      if (details) await must(tools.update('session_details', sessionId, { collaborators: [userId], volunteerName, equipmentRequested: [], equipmentReady: [], equipmentOther: '' }), 'share details')
-      await audit(tools, { actorId: userId, action: 'claim', targetType: 'session', targetId: sessionId, fromState: 'open', toState: 'claimed' })
-
-      const profile = await getData<Profile>(tools, 'profiles', userId)
-      const label = `Grade ${session!.grade} · ${topicLabel(session!)}`
-      const when = `${formatDate(session!.sessionDate)}, ${details?.startTime || session!.timeBand}`
-      const school = session!.schoolId ? await getData<School>(tools, 'schools', session!.schoolId) : null
-      const place = [school?.name, school?.address, details?.room ? `Room ${details.room}` : ''].filter(Boolean).join(', ')
+      await must(tools.update('session_details', sessionId, { readyAt: nowSeconds() }), 'mark ready')
+      await audit(tools, { actorId: userId, action: 'class_ready', targetType: 'session', targetId: sessionId, toState: 'ready' })
+      const note = str(params, 'note', { max: 300 })
       await notify(tools, {
-        recipientId: userId,
-        kind: 'claim_confirmed',
-        title: `You’re booked: ${label}${school ? ` at ${school.name}` : ''}`,
-        body: [when, place, details?.arrivalNote ?? ''].filter(Boolean).join(' · '),
-        link: calendarLink({ title: `Career session: ${label}`, startSeconds: start, location: place || undefined }),
+        recipientId: claim!.data.volunteerId,
+        kind: 'status_changed',
+        title: `Your class is ready: ${formatDate(session!.sessionDate)}, ${details?.startTime || session!.timeBand}`,
+        body: [
+          `Grade ${session!.grade} · ${topicLabel(session!)}`,
+          details?.room ? `Room ${details.room}` : '',
+          details?.studentCount ? `${details.studentCount} students` : '',
+          note,
+        ]
+          .filter(Boolean)
+          .join(' · '),
       })
+      return ok({ sessionId })
+    }),
+
+  // ── D13 · Either side proposes a different date ───────────────────────────
+  proposeNewDate: ({ userId, params, tools, env }) =>
+    run('proposeNewDate', async () => {
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session) refuse('Session not found.', 'not_found')
+      if (session!.status !== 'claimed' && session!.status !== 'confirmed') refuse('Only a booked session can be moved.', 'stale_state')
+      const claim = await activeClaimFor(tools, sessionId)
+      if (!claim) refuse('No volunteer is booked.', 'stale_state')
+      const isVolunteer = claim!.data.volunteerId === userId
+      if (!isVolunteer) await requireSessionEditor(tools, userId, env.OWNER_USER_ID, session!)
+      const date = dateParam(params, 'date', { required: true })!
+      const timeBand = oneOf(params, 'timeBand', TIME_BANDS)
+      if (sessionStartSeconds(date, timeBand) <= nowSeconds()) refuse('Pick a date in the future.', 'invalid_input')
+      if (date === session!.sessionDate && timeBand === session!.timeBand) refuse('That’s the current date.', 'invalid_input')
+      const note = str(params, 'note', { max: 300 })
+      await must(tools.update('session_details', sessionId, { proposedDate: date, proposedTimeBand: timeBand, proposedBy: userId, proposedNote: note }), 'propose')
+      await audit(tools, { actorId: userId, action: 'propose_date', targetType: 'session', targetId: sessionId, fromState: formatDate(session!.sessionDate), toState: `${formatDate(date)} ${timeBand}`, reason: note })
       await notify(tools, {
-        recipientId: session!.teacherId,
-        kind: 'session_claimed',
-        title: `Volunteer booked: ${label}`,
-        body: `${profile?.displayName ?? 'A volunteer'}${profile?.profession ? `, ${profile.profession}` : ''} · ${when}`,
+        recipientId: isVolunteer ? session!.teacherId : claim!.data.volunteerId,
+        kind: 'change_requested',
+        title: `New date proposed: ${formatDate(date)} (${timeBand}) for Grade ${session!.grade} · ${topicLabel(session!)}`,
+        body: `${isVolunteer ? 'Your volunteer' : 'The teacher'} proposed moving it from ${formatDate(session!.sessionDate)}. ${note} Accept or decline in the app.`.trim(),
       })
-      return ok({ claimId: (claim as { data: { recordId: string } }).data.recordId, sessionId })
+      return ok({ sessionId })
+    }),
+
+  respondToProposal: ({ userId, params, tools, env }) =>
+    run('respondToProposal', async () => {
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const accept = oneOf(params, 'answer', ['accept', 'decline'] as const) === 'accept'
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session) refuse('Session not found.', 'not_found')
+      const details = await getData<SessionDetails & { proposedDate?: number | null; proposedTimeBand?: string; proposedBy?: string }>(tools, 'session_details', sessionId)
+      if (!details?.proposedDate || !details.proposedBy) refuse('There’s no proposed date to answer.', 'stale_state')
+      const claim = await activeClaimFor(tools, sessionId)
+      if (!claim) refuse('No volunteer is booked.', 'stale_state')
+      // The OTHER side answers: a volunteer's proposal is answered by the teacher side, and vice versa.
+      const proposedByVolunteer = details!.proposedBy === claim!.data.volunteerId
+      if (proposedByVolunteer) await requireSessionEditor(tools, userId, env.OWNER_USER_ID, session!)
+      else if (claim!.data.volunteerId !== userId) refuse('Only the booked volunteer can answer the teacher’s proposal.', 'forbidden')
+      if (details!.proposedBy === userId) refuse('You can’t answer your own proposal.', 'forbidden')
+
+      const clear = { proposedDate: null, proposedTimeBand: '', proposedBy: '', proposedNote: '' }
+      if (accept) {
+        const date = details!.proposedDate!
+        const band = (details!.proposedTimeBand || session!.timeBand) as TimeBand
+        if (sessionStartSeconds(date, band) <= nowSeconds()) refuse('That proposed date has passed. Propose a new one.', 'in_past')
+        await must(tools.update('session_requests', sessionId, { sessionDate: date, timeBand: band, status: 'confirmed' }), 'move session')
+        // Both sides agreed to the new date: the volunteer is available; the class needs re-confirming.
+        await must(tools.update('claims', claim!.recordId, { confirmedAt: nowSeconds() }), 'confirm')
+        await must(tools.update('session_details', sessionId, { ...clear, readyAt: null, startTime: '' }), 'apply proposal')
+      } else {
+        await must(tools.update('session_details', sessionId, clear), 'decline proposal')
+      }
+      await audit(tools, { actorId: userId, action: accept ? 'accept_date' : 'decline_date', targetType: 'session', targetId: sessionId, toState: formatDate(details!.proposedDate!) })
+      await notify(tools, {
+        recipientId: details!.proposedBy!,
+        kind: 'status_changed',
+        title: accept ? `New date agreed: ${formatDate(details!.proposedDate!)}` : `Proposed date declined: ${formatDate(details!.proposedDate!)}`,
+        body: `Grade ${session!.grade} · ${topicLabel(session!)}${accept ? '' : ` stays on ${formatDate(session!.sessionDate)}.`}`,
+      })
+      return ok({ sessionId, accepted: accept })
+    }),
+
+  // ── D13 · The program admin books an approved volunteer onto a session ───
+  assignVolunteer: ({ userId, params, tools, env }) =>
+    run('assignVolunteer', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const volunteerId = str(params, 'volunteerId', { required: true, max: 100 })
+      const claimId = await bookSession(tools, volunteerId, sessionId, userId)
+      return ok({ claimId, sessionId })
     }),
 
   // ── SH5 · Volunteer confirms availability ─────────────────────────────────
@@ -730,7 +883,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
         'withdraw',
       )
       await must(tools.update('session_requests', sessionId, { status: 'open' }), 'reopen')
-      if (details) await must(tools.update('session_details', sessionId, { collaborators: [], volunteerName: '', equipmentRequested: [], equipmentReady: [], equipmentOther: '' }), 'unshare details')
+      if (details) await must(tools.update('session_details', sessionId, { collaborators: [], volunteerName: '', volunteerEmail: '', volunteerPhone: '', accessNeeds: '', equipmentRequested: [], equipmentReady: [], equipmentOther: '', readyAt: null, proposedDate: null, proposedTimeBand: '', proposedBy: '', proposedNote: '' }), 'unshare details')
       await audit(tools, { actorId: userId, action: 'withdraw', targetType: 'session', targetId: sessionId, fromState: session!.status, toState: 'open' })
       await notify(tools, {
         recipientId: session!.teacherId,
@@ -790,6 +943,10 @@ export const actions: Record<string, ActionHandler<Env>> = {
           tools.update('claims', claim.recordId, { status: 'withdrawn', activeSlot: `withdrawn:${claim.recordId}`, withdrawnAt: nowSeconds() }),
           'release claim',
         )
+        // Stop sharing the private details (room, contacts) with the released volunteer.
+        if (await getData(tools, 'session_details', sessionId)) {
+          await must(tools.update('session_details', sessionId, { collaborators: [], volunteerEmail: '', volunteerPhone: '', accessNeeds: '', proposedDate: null, proposedBy: '' }), 'unshare details')
+        }
         await notify(tools, {
           recipientId: claim.data.volunteerId,
           kind: 'session_cancelled',

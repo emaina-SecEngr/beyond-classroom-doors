@@ -10,13 +10,14 @@
  * The board shows only what a request contains — grade, topic, date, time band,
  * class size. Room, exact time and arrival notes are shared after a claim.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { AuthOverlay, useQuery } from 'deepspace'
-import { Badge, Button, ConfirmModal, EmptyState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useToast } from '@/components/ui'
-import { ErrorNote, Loading, Page } from '../../components/Page'
+import { Badge, Button } from '@/components/ui'
+import { Loading, Page } from '../../components/Page'
+import { BoardList, OpenSessions, type BoardItem } from '../../components/OpenSessions'
 import { callAction } from '../../lib/actions'
-import { formatSessionDate, TIME_BAND_SHORT, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
+import { formatSessionDate, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import { useMe, type Me } from '../../lib/me'
 import { ADMIN_LANDED_KEY, useAccess } from '../../components/admin/shared'
 import { useSchools } from '../../lib/schools'
@@ -34,21 +35,12 @@ interface SessionRow {
   schoolId?: string
 }
 
-interface BoardItem {
-  id: string
-  grade: string
-  topic: string
-  topicOther?: string
-  sessionDate: number
-  timeBand: TimeBand
-  expectedHeadcount: number | null
-  schoolName?: string
-}
-
 export default function HomePage() {
   const me = useMe()
   if (!me.ready) return <Loading />
   if (!me.signedIn) return <SignedOutBoard />
+  // Volunteers don't use the Program board: their home is My sessions (D15).
+  if (!me.isStaff && !me.appRole) return <Navigate to="/my-sessions" replace />
   return me.isStaff ? <StaffHome me={me} /> : <LiveBoard me={me} />
 }
 
@@ -104,35 +96,6 @@ function SignedOutBoard() {
 // ── Signed in ────────────────────────────────────────────────────────────────
 
 function LiveBoard({ me }: { me: Me }) {
-  const toast = useToast()
-  const { records, status, error } = useQuery<SessionRow>('session_requests', {
-    where: { status: 'open' },
-    orderBy: 'sessionDate',
-    orderDir: 'asc',
-    limit: 200,
-  })
-  const [pending, setPending] = useState<BoardItem | null>(null)
-  const [busy, setBusy] = useState(false)
-  const { schools, byId: schoolById } = useSchools()
-  const [schoolFilter, setSchoolFilter] = useState('__all__')
-
-  const today = todaySeconds()
-  const upcoming = records.filter((r) => r.data.sessionDate >= today)
-  const schoolsOnBoard = schools.filter((sc) => upcoming.some((r) => r.data.schoolId === sc.id))
-  const items: BoardItem[] = upcoming
-    .filter((r) => schoolFilter === '__all__' || r.data.schoolId === schoolFilter)
-    .map((r) => ({ id: r.recordId, ...r.data, schoolName: schoolById.get(r.data.schoolId ?? '')?.name }))
-
-  async function claim() {
-    if (!pending) return
-    setBusy(true)
-    const res = await callAction<{ claimId: string }>('claimSession', { sessionId: pending.id })
-    setBusy(false)
-    setPending(null)
-    if (res.success) toast.success('Session booked', 'Details are in My sessions and your inbox.')
-    else toast.error('Could not claim', res.error)
-  }
-
   return (
     <Page
       title="Program board"
@@ -142,61 +105,10 @@ function LiveBoard({ me }: { me: Me }) {
     >
       {me.isStaff && <StaffWaiting />}
       <StatusBanner me={me} />
-
-      {schoolsOnBoard.length > 1 && (
-        <div className="mb-4 flex items-center gap-3">
-          <label htmlFor="school-filter" className="text-sm text-muted-foreground">
-            School
-          </label>
-          <Select value={schoolFilter} onValueChange={(v) => setSchoolFilter(v || '__all__')}>
-            <SelectTrigger id="school-filter" className="w-60">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All schools</SelectItem>
-              {schoolsOnBoard.map((sc) => (
-                <SelectItem key={sc.id} value={sc.id}>
-                  {sc.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      {status === 'loading' && <Loading label="Loading sessions…" />}
-      {status === 'error' && <ErrorNote message={error || 'Could not load the board. Refresh to try again.'} />}
-      {status === 'ready' && items.length === 0 && (
-        <EmptyState
-          title="No open sessions right now"
-          description={me.appRole === 'teacher' ? 'Post a request and it appears here for volunteers.' : 'New requests appear here as teachers post them.'}
-        />
-      )}
-      {status === 'ready' && items.length > 0 && (
-        <BoardList
-          items={items}
-          renderAction={(item) =>
-            me.canClaim ? (
-              <Button size="sm" onClick={() => setPending(item)}>
-                Claim
-              </Button>
-            ) : null
-          }
-        />
-      )}
-
-      <ConfirmModal
-        open={!!pending}
-        onClose={() => (busy ? undefined : setPending(null))}
-        onConfirm={claim}
-        title={pending ? `Claim Grade ${pending.grade} · ${topicText(pending.topic, pending.topicOther)}?` : 'Claim session?'}
-        description={
-          pending
-            ? `${pending.schoolName ? `${pending.schoolName}, ` : ''}${formatSessionDate(pending.sessionDate)}, ${TIME_BAND_SHORT[pending.timeBand]}. You can withdraw yourself up to 48 hours before.`
-            : undefined
-        }
-        confirmText="Claim session"
-        variant="default"
-        loading={busy}
+      {me.volunteer?.status === 'approved' && <MyBookings userId={me.userId} />}
+      <OpenSessions
+        canClaim={me.canClaim}
+        emptyDescription={me.appRole === 'teacher' ? 'Post a request and it appears here for volunteers.' : 'New requests appear here as teachers post them.'}
       />
     </Page>
   )
@@ -262,6 +174,80 @@ function StaffWaiting() {
   )
 }
 
+/** An approved volunteer's own upcoming sessions, at the top of the board (D13). */
+function MyBookings({ userId }: { userId: string | null }) {
+  const claims = useQuery<{ sessionId: string; volunteerId: string; status: string; confirmedAt: number | null }>('claims', {
+    where: { volunteerId: userId ?? '__none__', status: 'active' },
+    limit: 50,
+  })
+  const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
+  // Private details of the volunteer's own bookings (readable because they're the collaborator).
+  const details = useQuery<{ sessionId: string; teacherName?: string; teacherEmail?: string; studentCount?: number | null; classLabel?: string; room?: string }>(
+    'session_details',
+    { limit: 100 },
+  )
+  const { byId: schoolById } = useSchools()
+  const byId = new Map(sessions.records.map((r) => [r.recordId, r.data]))
+  const detailsById = new Map(details.records.map((r) => [r.data.sessionId, r.data]))
+  const today = todaySeconds()
+  const mine = claims.records
+    .map((c) => ({ c: c.data, s: byId.get(c.data.sessionId) }))
+    .filter((x): x is { c: (typeof x)['c']; s: SessionRow } => !!x.s && x.s.sessionDate >= today && x.s.status !== 'cancelled')
+    .sort((a, b) => a.s.sessionDate - b.s.sessionDate)
+  if (mine.length === 0) return null
+  return (
+    <section aria-label="Your sessions" className="mb-6 rounded-md border border-primary/30 bg-accent p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">Your sessions</h2>
+        <Link to="/my-sessions" className="text-sm font-medium text-primary underline-offset-4 hover:underline">
+          Open My sessions
+        </Link>
+      </div>
+      <ul className="mt-2 space-y-1 text-sm">
+        {mine.map(({ c, s }) => {
+          const d = detailsById.get(c.sessionId)
+          const label = `${topicText(s.topic, s.topicOther)}, grade ${s.grade}`
+          return (
+          <li key={c.sessionId} className="rounded-sm">
+            <Link
+              to={`/my-sessions?session=${encodeURIComponent(c.sessionId)}`}
+              className="-mx-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-sm px-2 py-1 hover:bg-card focus-visible:bg-card"
+              aria-label={`Open your session on ${formatSessionDate(s.sessionDate)}: ${topicText(s.topic, s.topicOther)}, grade ${s.grade}`}
+            >
+              <span className="font-medium tabular-nums">{formatSessionDate(s.sessionDate)}</span>
+              <span>
+                {topicText(s.topic, s.topicOther)} · Grade {s.grade}
+                {schoolById.get(s.schoolId ?? '') ? ` · ${schoolById.get(s.schoolId ?? '')!.name}` : ''}
+              </span>
+              {c.confirmedAt ? <Badge variant="success" size="sm">Confirmed</Badge> : <Badge variant="warning" size="sm">Please confirm</Badge>}
+              <span className="ml-auto text-xs font-medium text-primary">Open</span>
+            </Link>
+            <p className="px-2 pb-1 text-xs text-muted-foreground">
+              {[
+                d?.teacherName ? `Teacher: ${d.teacherName}` : '',
+                d?.classLabel ?? '',
+                d?.studentCount ? `${d.studentCount} students attending` : s.expectedHeadcount ? `about ${s.expectedHeadcount} students` : '',
+                d?.room ? `Room ${d.room}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              {d?.teacherEmail && (
+                <>
+                  {' · '}
+                  <a className="font-medium text-primary underline-offset-4 hover:underline" href={`mailto:${d.teacherEmail}?subject=${encodeURIComponent(`Career session: ${label}`)}`}>
+                    Email the teacher
+                  </a>
+                </>
+              )}
+            </p>
+          </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 function StatusBanner({ me }: { me: Me }) {
   // Teachers and staff use the board to look, not to claim.
   if (me.appRole || me.isStaff) return null
@@ -290,29 +276,5 @@ function StatusBanner({ me }: { me: Me }) {
         </Link>
       )}
     </div>
-  )
-}
-
-function BoardList({ items, renderAction }: { items: BoardItem[]; renderAction: (item: BoardItem) => ReactNode }) {
-  return (
-    <ul className="divide-y divide-border rounded-md border border-border bg-card">
-      {items.map((item) => (
-        <li key={item.id} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-4 sm:flex-nowrap">
-          <div className="w-32 shrink-0">
-            <p className="text-sm font-semibold tabular-nums">{formatSessionDate(item.sessionDate)}</p>
-            <p className="text-xs text-muted-foreground">{TIME_BAND_SHORT[item.timeBand]}</p>
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{topicText(item.topic, item.topicOther)}</p>
-            <p className="text-xs text-muted-foreground">
-              {item.schoolName ? `${item.schoolName} · ` : ''}Grade {item.grade}
-              {item.expectedHeadcount ? ` · about ${item.expectedHeadcount} students` : ''}
-            </p>
-          </div>
-          <Badge variant="info">Open</Badge>
-          <div className="shrink-0">{renderAction(item)}</div>
-        </li>
-      ))}
-    </ul>
   )
 }

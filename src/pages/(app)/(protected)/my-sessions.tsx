@@ -6,8 +6,8 @@
  * arrival notes are visible here only because the claim made you a collaborator
  * on that session's details.
  */
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from 'deepspace'
 import {
   Badge,
@@ -22,6 +22,7 @@ import {
   SelectValue,
   Textarea,
   Checkbox,
+  cn,
   Input,
   useToast,
 } from '@/components/ui'
@@ -40,6 +41,8 @@ import {
 } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
 import { useSchools } from '../../../lib/schools'
+import { ProposalBanner, ProposeDateButton } from '../../../components/DateProposal'
+import { OpenSessions } from '../../../components/OpenSessions'
 import { sessionStartSeconds } from '../../../lib/time'
 import { EQUIPMENT, SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
@@ -71,6 +74,14 @@ interface DetailsRow {
   equipmentRequested?: string[]
   equipmentOther?: string
   equipmentReady?: string[]
+  teacherName?: string
+  teacherEmail?: string
+  accessNeeds?: string
+  readyAt?: number | null
+  proposedDate?: number | null
+  proposedTimeBand?: string
+  proposedBy?: string
+  proposedNote?: string
 }
 
 interface Booking {
@@ -88,6 +99,9 @@ export default function MySessionsPage() {
   const me = useMe()
   const toast = useToast()
   const claims = useQuery<ClaimRow>('claims', { where: { volunteerId: me.userId ?? '__none__' }, limit: 200 })
+  // Opened from the board (/my-sessions?session=<id>): scroll to that session and highlight it.
+  const [params] = useSearchParams()
+  const focusId = params.get('session')
   const sessions = useQuery<SessionRow>('session_requests', { limit: 500 })
   const details = useQuery<DetailsRow>('session_details', { limit: 200 })
   const { byId: schoolById } = useSchools()
@@ -95,6 +109,15 @@ export default function MySessionsPage() {
   const [busy, setBusy] = useState(false)
   const [changeKind, setChangeKind] = useState<'cancel' | 'reschedule'>('reschedule')
   const [changeNote, setChangeNote] = useState('')
+
+  useEffect(() => {
+    if (!focusId || claims.status !== 'ready') return
+    const el = document.getElementById(`session-${focusId}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      el.focus({ preventScroll: true })
+    }
+  }, [focusId, claims.status])
 
   if (!me.ready || claims.status === 'loading' || sessions.status === 'loading' || details.status === 'loading') return <Loading />
 
@@ -146,8 +169,9 @@ export default function MySessionsPage() {
   const label = (b: Booking) => (b.session ? `Grade ${b.session.grade} · ${topicText(b.session.topic, b.session.topicOther)}` : 'Session')
 
   return (
-    <Page title="My sessions" intro="Sessions you’ve claimed. Confirm you’re coming, and let the school know early if plans change.">
+    <Page title="My sessions" intro="Your career sessions. Confirm you’re coming, tell the teacher what you need, and let the school know early if plans change.">
       {loadError && <ErrorNote message={loadError} />}
+      <ApplicationStatus volunteer={me.volunteer} canClaim={me.canClaim} />
 
       {!me.canClaim && bookings.length === 0 && (
         <EmptyState
@@ -159,7 +183,7 @@ export default function MySessionsPage() {
       {(me.canClaim || bookings.length > 0) && (
         <Section title="Upcoming">
           {upcoming.length === 0 ? (
-            <EmptyState title="Nothing booked" description="Open sessions are on the board." />
+            <EmptyState title="Nothing booked yet" description="Claim one of the open sessions below, or the program may assign you one." />
           ) : (
             <ul className="space-y-4">
               {upcoming.map((b) => {
@@ -167,7 +191,15 @@ export default function MySessionsPage() {
                 const canWithdraw = hoursLeft >= SELF_WITHDRAW_MIN_HOURS
                 const status = b.session!.status
                 return (
-                  <li key={b.claimId} className="rounded-md border border-border bg-card p-5">
+                  <li
+                    key={b.claimId}
+                    id={`session-${b.sessionId}`}
+                    tabIndex={-1}
+                    className={cn(
+                      'scroll-mt-20 rounded-md border bg-card p-5 outline-none',
+                      focusId === b.sessionId ? 'border-primary ring-2 ring-primary/30' : 'border-border',
+                    )}
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h3 className="font-semibold">{label(b)}</h3>
@@ -175,7 +207,10 @@ export default function MySessionsPage() {
                           {formatSessionDate(b.session!.sessionDate)}, {sessionTimeText(b.session!.timeBand, b.details?.startTime)}
                         </p>
                       </div>
-                      <Badge variant={SESSION_STATUS_BADGE[status]}>{status === 'claimed' ? 'Awaiting your confirmation' : SESSION_STATUS_LABELS[status]}</Badge>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={SESSION_STATUS_BADGE[status]}>{status === 'claimed' ? 'Awaiting your confirmation' : SESSION_STATUS_LABELS[status]}</Badge>
+                        {b.details?.readyAt ? <Badge variant="success">Class ready</Badge> : <Badge variant="outline">Class not ready yet</Badge>}
+                      </div>
                     </div>
 
                     <dl className="mt-4 space-y-1.5">
@@ -183,6 +218,22 @@ export default function MySessionsPage() {
                         const sc = schoolById.get(b.session!.schoolId ?? '')
                         return sc ? <Fact label="School">{[sc.name, sc.address, sc.city].filter(Boolean).join(', ')}</Fact> : null
                       })()}
+                      {b.details?.teacherName || b.details?.teacherEmail ? (
+                        <Fact label="Teacher">
+                          {b.details?.teacherName || 'Your teacher'}
+                          {b.details?.teacherEmail && (
+                            <>
+                              {' · '}
+                              <a
+                                className="text-primary underline-offset-4 hover:underline"
+                                href={`mailto:${b.details.teacherEmail}?subject=${encodeURIComponent(`Career session: ${label(b)}`)}`}
+                              >
+                                Email
+                              </a>
+                            </>
+                          )}
+                        </Fact>
+                      ) : null}
                       <Fact label="Room">{b.details?.room || 'Not set yet — the teacher or program staff will add it'}</Fact>
                       {b.details?.arrivalNote && <Fact label="On arrival">{b.details.arrivalNote}</Fact>}
                       {b.details?.teacherNote && <Fact label="From the teacher">{b.details.teacherNote}</Fact>}
@@ -194,6 +245,17 @@ export default function MySessionsPage() {
                       ) : null}
                     </dl>
 
+                    {b.details?.proposedDate ? (
+                      <ProposalBanner
+                        sessionId={b.sessionId}
+                        proposedDate={b.details.proposedDate}
+                        proposedTimeBand={b.details.proposedTimeBand}
+                        proposedNote={b.details.proposedNote}
+                        mine={b.details.proposedBy === me.userId}
+                        who="The teacher"
+                      />
+                    ) : null}
+
                     <NeedsEditor sessionId={b.sessionId} details={b.details} />
 
                     <div className="mt-5 flex flex-wrap gap-2">
@@ -202,6 +264,7 @@ export default function MySessionsPage() {
                           Confirm I’m coming
                         </Button>
                       )}
+                      {!b.details?.proposedDate && <ProposeDateButton sessionId={b.sessionId} label={label(b)} />}
                       {canWithdraw ? (
                         <Button size="sm" variant="outline" onClick={() => setPending({ kind: 'withdraw', booking: b })}>
                           Withdraw
@@ -217,9 +280,12 @@ export default function MySessionsPage() {
               })}
             </ul>
           )}
-          <p className="mt-4 text-sm text-muted-foreground">
-            Looking for more? <Link to="/home" className="text-primary underline-offset-4 hover:underline">Open the session board</Link>.
-          </p>
+        </Section>
+      )}
+
+      {me.canClaim && (
+        <Section title="Open sessions" description="Sessions teachers have asked for that still need a volunteer. Claim one and the teacher is told right away.">
+          <OpenSessions canClaim emptyDescription="New requests appear here as teachers post them." />
         </Section>
       )}
 
@@ -322,11 +388,12 @@ function NeedsEditor({ sessionId, details }: { sessionId: string; details: Detai
   const [editing, setEditing] = useState(false)
   const [items, setItems] = useState<string[]>(saved)
   const [other, setOther] = useState(details?.equipmentOther ?? '')
+  const [access, setAccess] = useState(details?.accessNeeds ?? '')
   const [busy, setBusy] = useState(false)
 
   async function save() {
     setBusy(true)
-    const res = await callAction('requestEquipment', { sessionId, items, other })
+    const res = await callAction('requestEquipment', { sessionId, items, other, accessNeeds: access })
     setBusy(false)
     if (!res.success) {
       toast.error('Could not save', res.error)
@@ -339,7 +406,7 @@ function NeedsEditor({ sessionId, details }: { sessionId: string; details: Detai
   return (
     <div className="mt-5 rounded-md border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold">What you’ll need</h4>
+        <h4 className="text-sm font-semibold">What you’ll need on the day</h4>
         {!editing && (
           <Button
             size="sm"
@@ -347,10 +414,11 @@ function NeedsEditor({ sessionId, details }: { sessionId: string; details: Detai
             onClick={() => {
               setItems(saved)
               setOther(details?.equipmentOther ?? '')
+              setAccess(details?.accessNeeds ?? '')
               setEditing(true)
             }}
           >
-            {saved.length || details?.equipmentOther ? 'Change' : 'Add items'}
+            {saved.length || details?.equipmentOther || details?.accessNeeds ? 'Change' : 'Add'}
           </Button>
         )}
       </div>
@@ -367,6 +435,13 @@ function NeedsEditor({ sessionId, details }: { sessionId: string; details: Detai
           <Field label="Anything else?" htmlFor={`other-${sessionId}`}>
             <Input id={`other-${sessionId}`} value={other} onChange={(e) => setOther(e.target.value)} maxLength={200} placeholder="For example: a table near an outlet" />
           </Field>
+          <Field
+            label="Anything that would help you on the day?"
+            htmlFor={`access-${sessionId}`}
+            hint="For example: a step-free route or parking near the entrance. Shared only with this teacher and school staff."
+          >
+            <Textarea id={`access-${sessionId}`} rows={2} value={access} onChange={(e) => setAccess(e.target.value)} maxLength={300} />
+          </Field>
           <div className="flex gap-2">
             <Button size="sm" onClick={() => void save()} loading={busy}>
               Send to the teacher
@@ -376,8 +451,8 @@ function NeedsEditor({ sessionId, details }: { sessionId: string; details: Detai
             </Button>
           </div>
         </div>
-      ) : saved.length === 0 && !details?.equipmentOther ? (
-        <p className="mt-1 text-sm text-muted-foreground">Projector, markers, paper? Tell the teacher what to have ready.</p>
+      ) : saved.length === 0 && !details?.equipmentOther && !details?.accessNeeds ? (
+        <p className="mt-1 text-sm text-muted-foreground">Projector, markers, paper, a step-free route? Tell the teacher what to have ready.</p>
       ) : (
         <ul className="mt-2 space-y-1 text-sm">
           {saved.map((e) => (
@@ -395,7 +470,36 @@ function NeedsEditor({ sessionId, details }: { sessionId: string; details: Detai
             </li>
           ))}
           {details?.equipmentOther && <li className="text-muted-foreground">Also: {details.equipmentOther}</li>}
+          {details?.accessNeeds && <li className="text-muted-foreground">On the day: {details.accessNeeds}</li>}
         </ul>
+      )}
+    </div>
+  )
+}
+
+/** Where the volunteer's application stands, with the next step (shown until they can claim). */
+function ApplicationStatus({ volunteer, canClaim }: { volunteer: { status: string } | null; canClaim: boolean }) {
+  if (canClaim) return null
+  let text: string
+  let link: { to: string; label: string } | null = { to: '/apply', label: 'Open your profile' }
+  if (!volunteer) {
+    text = 'Tell us about your work to apply. The nonprofit checks and approves every volunteer.'
+    link = { to: '/apply', label: 'Apply to volunteer' }
+  } else if (volunteer.status === 'approved') {
+    text = 'Your clearance has expired, so you can’t take new sessions. Contact the program team to renew.'
+    link = null
+  } else if (volunteer.status === 'rejected' || volunteer.status === 'declined') {
+    text = 'Your application wasn’t approved. Your profile shows the reason.'
+  } else {
+    text = 'Your application is waiting for the program admin. Once you’re approved, open sessions appear here.'
+  }
+  return (
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4 text-sm">
+      <p className="min-w-0 max-w-prose">{text}</p>
+      {link && (
+        <Link to={link.to} className="font-medium text-primary underline-offset-4 hover:underline">
+          {link.label}
+        </Link>
       )}
     </div>
   )

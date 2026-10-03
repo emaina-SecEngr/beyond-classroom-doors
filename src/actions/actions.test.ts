@@ -487,6 +487,92 @@ describe('richer profile and license documents (D12, standing test 22)', () => {
   })
 })
 
+describe('assigning, class ready, new dates and contact (D13, standing test 23)', () => {
+  const details = () => row('session_details', S) as Row
+  it('the program admin can book an approved volunteer onto a session; the same checks apply', async () => {
+    expect(await call('assignVolunteer', 'u_staff', { sessionId: S, volunteerId: 'u_vol' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('assignVolunteer', OWNER, { sessionId: S, volunteerId: 'u_applicant' })).toMatchObject({ success: false, code: 'not_approved' })
+    expect(await call('assignVolunteer', OWNER, { sessionId: S, volunteerId: 'u_expired' })).toMatchObject({ success: false, code: 'clearance_expired' })
+    expect((await call('assignVolunteer', OWNER, { sessionId: S, volunteerId: 'u_vol' })).success).toBe(true)
+    expect(rows('claims').find((c) => c.status === 'active')).toMatchObject({ volunteerId: 'u_vol', sessionId: S })
+    expect(rows('notifications').some((n) => n.recipientId === 'u_vol' && String(n.title).startsWith('The program booked you'))).toBe(true)
+    expect(await call('assignVolunteer', OWNER, { sessionId: S, volunteerId: 'u_vol2' })).toMatchObject({ success: false, code: 'already_claimed' })
+  })
+  it('booking shares contact details only on the private session row, never in notifications', async () => {
+    await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', phone: '+1 (619) 555-0100' })
+    // (profile edit sent u_vol back to review only if work/license fields changed — phone doesn't)
+    expect(row('volunteer_status', 'u_vol')?.status).toBe('approved')
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect(details()).toMatchObject({ volunteerEmail: 'u_vol@example.org', volunteerPhone: '+1 (619) 555-0100', teacherEmail: 'u_teacher@example.org' })
+    expect(JSON.stringify(rows('notifications'))).not.toMatch(/@example\.org|555-0100/)
+    await call('withdrawClaim', 'u_vol', { sessionId: S })
+    expect(details()).toMatchObject({ volunteerEmail: '', volunteerPhone: '', collaborators: [] })
+  })
+  it('a bad phone number is refused', async () => {
+    expect(await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', phone: 'call me maybe' })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+  it('the teacher marks the class ready; the volunteer is told; nobody else can', async () => {
+    expect(await call('markClassReady', 'u_teacher', { sessionId: S })).toMatchObject({ success: false, code: 'stale_state' }) // nobody booked
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect(await call('markClassReady', 'u_teacher2', { sessionId: S })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('markClassReady', 'u_vol', { sessionId: S })).toMatchObject({ success: false, code: 'forbidden' })
+    expect((await call('markClassReady', 'u_teacher', { sessionId: S, note: 'Projector set up' })).success).toBe(true)
+    expect(details().readyAt).toBeGreaterThan(0)
+    expect(rows('notifications').some((n) => n.recipientId === 'u_vol' && String(n.title).startsWith('Your class is ready'))).toBe(true)
+  })
+  it('the teacher proposes a later date; only the volunteer can accept; accepting moves the session', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect((await call('proposeNewDate', 'u_teacher', { sessionId: S, date: futureDate(20), timeBand: 'afternoon', note: 'Projector out for repair' })).success).toBe(true)
+    expect(await call('respondToProposal', 'u_teacher', { sessionId: S, answer: 'accept' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('respondToProposal', 'u_vol2', { sessionId: S, answer: 'accept' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect((await call('respondToProposal', 'u_vol', { sessionId: S, answer: 'accept' })).success).toBe(true)
+    expect(row('session_requests', S)).toMatchObject({ timeBand: 'afternoon', status: 'confirmed' })
+    expect(details()).toMatchObject({ proposedDate: null, proposedBy: '', readyAt: null })
+  })
+  it('the volunteer proposes a later date; the teacher side answers; declining keeps the date', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    const before = row('session_requests', S)?.sessionDate
+    expect((await call('proposeNewDate', 'u_vol', { sessionId: S, date: futureDate(25), timeBand: 'midday' })).success).toBe(true)
+    expect(await call('respondToProposal', 'u_vol', { sessionId: S, answer: 'accept' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect((await call('respondToProposal', 'u_teacher', { sessionId: S, answer: 'decline' })).success).toBe(true)
+    expect(row('session_requests', S)?.sessionDate).toBe(before)
+    expect(rows('notifications').some((n) => n.recipientId === 'u_vol' && String(n.title).startsWith('Proposed date declined'))).toBe(true)
+  })
+  it('proposals must be in the future, differ from the current date, and come from a party to the booking', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect(await call('proposeNewDate', 'u_vol', { sessionId: S, date: '2020-01-01', timeBand: 'morning' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('proposeNewDate', 'u_vol2', { sessionId: S, date: futureDate(25), timeBand: 'morning' })).toMatchObject({ success: false, code: 'forbidden' })
+    const cur = row('session_requests', S) as Row
+    const iso = new Date((cur.sessionDate as number) * 1000).toISOString().slice(0, 10)
+    expect(await call('proposeNewDate', 'u_vol', { sessionId: S, date: iso, timeBand: cur.timeBand })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+})
+
+describe('access needs (D14, standing test 24)', () => {
+  const needs = 'Step-free route and parking close to the entrance'
+  it('saved on the profile without sending an approved volunteer back to review', async () => {
+    await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', accessNeeds: needs })
+    expect(row('profiles', 'u_vol')?.accessNeeds).toBe(needs)
+    expect(row('volunteer_status', 'u_vol')?.status).toBe('approved')
+  })
+  it('copied to the private session row on booking; the teacher is told THAT there are needs, not WHAT', async () => {
+    await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', accessNeeds: needs })
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect(row('session_details', S)?.accessNeeds).toBe(needs)
+    const n = rows('notifications').find((x) => x.recipientId === 'u_teacher' && x.kind === 'session_claimed')
+    expect(String(n?.body)).toContain('access needs')
+    expect(JSON.stringify(rows('notifications'))).not.toContain('Step-free')
+  })
+  it('the volunteer can adjust them for one session; others cannot; withdrawing clears them', async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+    expect((await call('requestEquipment', 'u_vol', { sessionId: S, items: [], accessNeeds: 'A chair at the front' })).success).toBe(true)
+    expect(row('session_details', S)?.accessNeeds).toBe('A chair at the front')
+    expect(await call('requestEquipment', 'u_vol2', { sessionId: S, items: [], accessNeeds: 'x' })).toMatchObject({ success: false, code: 'forbidden' })
+    await call('withdrawClaim', 'u_vol', { sessionId: S })
+    expect(row('session_details', S)?.accessNeeds).toBe('')
+  })
+})
+
 describe('session requests (standing test 6)', () => {
   it('only teachers can post requests', async () => {
     const r = await call('createSessionRequest', 'u_vol', { grade: '9', topic: 'technology', sessionDate: futureDate(5), timeBand: 'midday' })

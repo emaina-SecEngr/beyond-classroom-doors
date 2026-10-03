@@ -27,6 +27,7 @@ export interface EditableDetails {
   equipmentRequested?: string[]
   equipmentOther?: string
   equipmentReady?: string[]
+  accessNeeds?: string
 }
 
 /** Build the modal's input from a session_details row. */
@@ -44,6 +45,7 @@ export function toEditable(sessionId: string, label: string, d: Partial<Editable
     equipmentRequested: d?.equipmentRequested ?? [],
     equipmentOther: d?.equipmentOther ?? '',
     equipmentReady: d?.equipmentReady ?? [],
+    accessNeeds: d?.accessNeeds ?? '',
   }
 }
 
@@ -120,6 +122,11 @@ export function SessionDetailsModal({ details, onClose }: { details: EditableDet
               <Textarea id="sd-note" rows={2} value={form.teacherNote} onChange={(e) => set('teacherNote', e.target.value)} maxLength={300} />
             </Field>
           </div>
+          {details?.accessNeeds ? (
+            <div className="rounded-sm bg-accent px-3 py-2 text-sm sm:col-span-2">
+              <span className="font-medium">To help the volunteer on the day:</span> {details.accessNeeds}
+            </div>
+          ) : null}
           <fieldset className="sm:col-span-2">
             <legend className="text-sm font-medium">What the volunteer needs</legend>
             {requested.length === 0 && !details?.equipmentOther ? (

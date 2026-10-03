@@ -249,6 +249,13 @@ Extend the scaffold's three specs; don't add parallel suites.
 22. A license file opens only for its volunteer or an approver (program admin / delegated
     staff); it is fetched from that volunteer's private space only; approver views are
     audited; uploads are PDF/JPG/PNG up to 5 MB.
+23. Only the program admin assigns a volunteer to a session, with the same checks as a
+    self-claim; a date proposal can only be answered by the other party; contact details
+    live only on the private session row (never in notifications) and are cleared on
+    withdraw or cancel.
+24. A volunteer's access needs are practical help, never a diagnosis; they reach only the
+    booked session's teacher, school staff and the program admin; notifications say only
+    that needs exist; only the volunteer edits them; cleared on withdraw or cancel.
 
 ---
 

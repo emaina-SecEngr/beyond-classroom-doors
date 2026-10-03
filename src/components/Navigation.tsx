@@ -16,6 +16,7 @@ import { APP_NAME } from '../constants'
 import type { Role } from '../constants'
 import { nav } from '../nav'
 import { useAccess } from './admin/shared'
+import { useMe } from '../lib/me'
 import { callAction } from '../lib/actions'
 
 // Users we've already checked for a teacher invite in this page load (D10).
@@ -44,6 +45,7 @@ export default function Navigation() {
   const userRole = (user?.role ?? 'anonymous') as Role | 'anonymous'
   // Only staff need the server's answer (program admin? approvals delegated?).
   const access = useAccess(isSignedIn && userRole === 'admin')
+  const me = useMe()
 
   // D10: after sign-in, accept a pending teacher invite for this account, if any.
   // The server matches the account's verified email; the browser sends nothing else.
@@ -65,10 +67,16 @@ export default function Navigation() {
   const visibleNav = nav.filter((item) => {
     if (item.devOnly && !import.meta.env.DEV) return false
     if (item.show) {
+      if (!isSignedIn) return item.show === 'team' && item.path === '/home' // signed out: just the board
       if (userRole === 'admin' && access === null) return false // wait for the server's answer
+      if (!me.ready) return false
       const programAdmin = !!access?.nonprofitAdmin
-      if (item.show === 'notProgramAdmin' && programAdmin) return false
+      const volunteer = !me.isStaff && !me.appRole
       if (item.show === 'approvers' && !access?.canVet) return false
+      if (item.show === 'volunteer' && !volunteer) return false
+      if (item.show === 'teacher' && me.appRole !== 'teacher') return false
+      if (item.show === 'team' && volunteer) return false
+      if (item.show === 'inbox' && programAdmin) return false
     }
     if (!item.roles) return true
     if (!profileReady) return false

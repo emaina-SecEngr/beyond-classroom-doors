@@ -24,6 +24,7 @@ import {
 } from '@/components/ui'
 import { ErrorNote, Field, Loading, Page, Panel, Section } from '../../../components/Page'
 import { SessionDetailsModal, toEditable, type EditableDetails } from '../../../components/SessionDetailsModal'
+import { BookedSessionTools } from '../../../components/BookedSessionTools'
 import { callAction } from '../../../lib/actions'
 import {
   formatSessionDate,
@@ -62,6 +63,14 @@ interface DetailsRow {
   equipmentRequested?: string[]
   equipmentOther?: string
   equipmentReady?: string[]
+  volunteerEmail?: string
+  volunteerPhone?: string
+  accessNeeds?: string
+  readyAt?: number | null
+  proposedDate?: number | null
+  proposedTimeBand?: string
+  proposedBy?: string
+  proposedNote?: string
 }
 
 const EMPTY_FORM = {
@@ -194,6 +203,7 @@ export default function TeachPage() {
                   <Button size="sm" variant="ghost" onClick={() => setCancelling({ id: r.recordId, label: `${label}, ${formatSessionDate(r.data.sessionDate)}` })}>
                     Cancel
                   </Button>
+                  <BookedSessionTools sessionId={r.recordId} label={label} status={r.data.status} details={d} viewerId={me.userId} />
                 </li>
               )
             })}
