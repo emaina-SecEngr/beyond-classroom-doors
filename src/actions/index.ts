@@ -180,12 +180,12 @@ export const actions: Record<string, ActionHandler<Env>> = {
       // Separation of duties at assignment time too: whoever can vet (staff, the
       // nonprofit admin) must never hold the second key, not even as an unusable seat.
       if (role === 'board_member' && (await isStaff(tools, targetId, env.OWNER_USER_ID))) {
-        refuse('Program staff and the nonprofit admin can’t be board approvers — the board key must be someone else.', 'forbidden')
+        refuse('Program staff and the nonprofit admin can’t be the Program Admin — that approval must come from someone else.', 'forbidden')
       }
       const previous = await appRoleOf(tools, targetId)
       await must(tools.create('role_assignments', { userId: targetId, role, assignedBy: userId }, targetId), 'assign role')
       await audit(tools, { actorId: userId, action: 'assign_role', targetType: 'user', targetId, fromState: previous ?? 'none', toState: role })
-      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You now have ${role === 'teacher' ? 'teacher' : 'board approver'} access.` })
+      await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `You now have ${role === 'teacher' ? 'teacher' : 'Program Admin'} access.` })
       return ok({ userId: targetId, role })
     }),
 
@@ -243,7 +243,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       await notify(tools, {
         recipientId: targetId,
         kind: 'status_changed',
-        title: outcome === 'vetted' ? 'Your vetting is complete. The board reviews next.' : 'Your application was not approved.',
+        title: outcome === 'vetted' ? 'Your vetting is complete. The Program Admin reviews next.' : 'Your application was not approved.',
         body: outcome === 'rejected' ? reason : '',
       })
       return ok({ userId: targetId, status: outcome })
@@ -276,14 +276,14 @@ export const actions: Record<string, ActionHandler<Env>> = {
     run('approveVolunteer', async () => {
       await requireAppRole(tools, userId, 'board_member')
       // Separation of duties (M3-AC3): the staff key and the board key must be different people.
-      if (await isStaff(tools, userId, env.OWNER_USER_ID)) refuse('Staff cannot give the board approval.', 'forbidden')
+      if (await isStaff(tools, userId, env.OWNER_USER_ID)) refuse('Staff cannot give the Program Admin approval.', 'forbidden')
       const targetId = str(params, 'userId', { required: true, max: 100 })
       const outcome = oneOf(params, 'outcome', ['approved', 'declined'] as const)
       const reason = str(params, 'reason', { max: 500 })
 
       const current = await statusOf(tools, targetId)
       if (!current) refuse('No application found for that volunteer.', 'not_found')
-      if (current!.status !== 'vetted') refuse(`This volunteer is ${current!.status}, not awaiting board approval.`, 'stale_state')
+      if (current!.status !== 'vetted') refuse(`This volunteer is ${current!.status}, not awaiting Program Admin approval.`, 'stale_state')
       if (outcome === 'declined' && !reason) refuse('A reason is required to decline.', 'invalid_input')
       if (outcome === 'approved' && !((current!.clearanceExpiresAt ?? 0) > nowSeconds())) {
         refuse('This volunteer’s clearance has expired.', 'clearance_expired')
@@ -293,7 +293,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       await notify(tools, {
         recipientId: targetId,
         kind: 'status_changed',
-        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'The board did not approve your application.',
+        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'The Program Admin did not approve your application.',
         body: outcome === 'declined' ? reason : '',
       })
       return ok({ userId: targetId, status: outcome })

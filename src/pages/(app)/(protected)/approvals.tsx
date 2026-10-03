@@ -49,8 +49,8 @@ export default function ApprovalsPage() {
   if (!me.ready) return <Loading />
   if (!isBoardMember) {
     return (
-      <Page title="Board approvals">
-        <EmptyState title="For the nonprofit’s board" description="Program staff give this access to the board member(s) who approve volunteers." />
+      <Page title="Program Admin approvals">
+        <EmptyState title="For the Program Admin" description="The nonprofit admin gives this access to the person who approves volunteers." />
       </Page>
     )
   }
@@ -73,8 +73,8 @@ export default function ApprovalsPage() {
 
   return (
     <Page
-      title="Board approvals"
-      intro="The nonprofit has confirmed each volunteer’s identity, license (where relevant) and school clearance. The board’s approval lets them claim sessions."
+      title="Program Admin approvals"
+      intro="The nonprofit has confirmed each volunteer’s identity, license (where relevant) and school clearance. Your approval lets them claim sessions."
       actions={
         <Button variant="outline" size="sm" onClick={() => void load()}>
           Refresh

@@ -141,7 +141,7 @@ export default function MySessionsPage() {
       {!me.canClaim && bookings.length === 0 && (
         <EmptyState
           title="No sessions yet"
-          description={me.volunteer ? 'Once you’re approved, claim a session from the board.' : 'Apply to volunteer first. The nonprofit vets and its board approves every volunteer.'}
+          description={me.volunteer ? 'Once you’re approved, claim a session from the board.' : 'Apply to volunteer first. The nonprofit vets and the Program Admin approves every volunteer.'}
         />
       )}
 

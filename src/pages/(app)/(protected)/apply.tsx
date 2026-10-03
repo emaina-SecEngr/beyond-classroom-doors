@@ -15,10 +15,10 @@ import { useMe } from '../../../lib/me'
 
 const NEXT_STEP: Record<string, string> = {
   applied: 'The nonprofit will confirm your identity, check any professional license, and record your school clearance (TB test and background check).',
-  vetted: 'Vetting is done. The nonprofit’s board gives the final approval.',
+  vetted: 'Vetting is done. The Program Admin gives the final approval.',
   approved: 'You can claim sessions on the board.',
   rejected: 'Program staff did not approve this application.',
-  declined: 'The board did not approve this application.',
+  declined: 'The Program Admin did not approve this application.',
   renewal_pending: 'Your clearance needs renewing before you can claim new sessions.',
 }
 

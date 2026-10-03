@@ -37,10 +37,10 @@ export const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
 
 export const VOLUNTEER_STATUS_LABELS: Record<VolunteerStatus, string> = {
   applied: 'Waiting for vetting',
-  vetted: 'Waiting for board approval',
+  vetted: 'Waiting for Program Admin approval',
   approved: 'Approved',
   rejected: 'Not approved',
-  declined: 'Not approved by the board',
+  declined: 'Not approved by the Program Admin',
   renewal_pending: 'Clearance renewal pending',
 }
 
