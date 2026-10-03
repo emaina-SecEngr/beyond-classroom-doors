@@ -78,7 +78,7 @@ interface ChangeRow {
   status: 'open' | 'resolved'
 }
 
-const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher', board_member: 'Program Admin' }
+const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher', board_member: 'Board approver' }
 
 interface Access {
   nonprofitAdmin: boolean
@@ -227,7 +227,7 @@ function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
       toast.error('That didn’t go through', res.error)
       return
     }
-    toast.success(outcome === 'vetted' ? 'Marked as vetted' : 'Application rejected', outcome === 'vetted' ? 'The Program Admin gives the final approval.' : undefined)
+    toast.success(outcome === 'vetted' ? 'Marked as vetted' : 'Application rejected', outcome === 'vetted' ? 'A board member gives the final approval.' : undefined)
     setOpen(null)
     setForm(EMPTY_VET)
   }
@@ -270,7 +270,7 @@ function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
           <Modal.Title>Vet {name}</Modal.Title>
           <Modal.Description>
             {open?.profile?.profession}
-            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked; the Program Admin sees a summary.
+            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked; the board sees a summary.
           </Modal.Description>
         </Modal.Header>
         <Modal.Body>
@@ -457,7 +457,7 @@ function ProgramStaff({ people, setRole, access }: { people: Person[]; setRole: 
         }
         description={
           confirming?.role === 'admin'
-            ? 'They’ll work with teachers on sessions, assign teacher roles, and read the audit log. They can’t vet unless you ask them to help, and staff can never give the Program Admin approval.'
+            ? 'They’ll work with teachers on sessions, assign teacher roles, and read the audit log. They can’t vet unless you ask them to help, and staff can never give board approval.'
             : 'They’ll lose the staff desk immediately.'
         }
         confirmText={confirming?.role === 'admin' ? 'Make staff' : 'Remove staff'}
@@ -466,7 +466,7 @@ function ProgramStaff({ people, setRole, access }: { people: Person[]; setRole: 
       <Modal open={!!asking} onClose={() => !busy && setAsking(null)} size="sm">
         <Modal.Header>
           <Modal.Title>Ask {asking?.name || asking?.email} to help vet?</Modal.Title>
-          <Modal.Description>They can vet volunteers until the help ends. The Program Admin still gives the final approval.</Modal.Description>
+          <Modal.Description>They can vet volunteers until the help ends. The board still gives the final approval.</Modal.Description>
         </Modal.Header>
         <Modal.Body>
           <div className="space-y-4">
@@ -550,8 +550,8 @@ function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boo
       <p className="mb-4 text-sm text-muted-foreground">
         Give teacher access to the school’s teachers.{' '}
         {nonprofitAdmin
-          ? 'As the nonprofit admin, you also seat the Program Admin who approves volunteers; a Program Admin can’t be program staff.'
-          : 'The Program Admin is seated by the nonprofit admin.'}{' '}
+          ? 'As the nonprofit admin, you also seat the board member(s) who approve volunteers; board approvers can’t be program staff.'
+          : 'Board approvers are seated by the nonprofit admin.'}{' '}
         Volunteers need no role.
       </p>
       <ul className="divide-y divide-border rounded-md border border-border bg-card">
@@ -572,7 +572,7 @@ function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boo
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="teacher">Teacher</SelectItem>
-                    {nonprofitAdmin && p.platformRole !== 'admin' && <SelectItem value="board_member">Program Admin</SelectItem>}
+                    {nonprofitAdmin && p.platformRole !== 'admin' && <SelectItem value="board_member">Board approver</SelectItem>}
                   </SelectContent>
                 </Select>
                 <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id} disabled={!choice[p.id] || choice[p.id] === current}>
