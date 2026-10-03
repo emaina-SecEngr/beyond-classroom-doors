@@ -135,13 +135,13 @@ fi
 
 # ── §1.18 Only the nonprofit admin changes who is staff (decision R6) ──────
 # Regression guard: DeepSpace's set-role message lets any admin set any role.
-# worker.ts must keep intercepting it, and setRole stays in the staff page only.
+# worker.ts must keep intercepting it, and setRole stays in src/components/admin/StaffAccess.tsx only.
 if [ -f worker.ts ]; then
   if ! grep -qE "decideSetRole\(" worker.ts; then
     report HARD "§1.18" "worker.ts no longer checks set-role messages (decideSetRole)" "worker.ts"
   fi
   if [ -d src/pages ]; then
-    out=$(grep -rnE --include='*.tsx' --include='*.ts' "setRole\b" src/pages src/components src/lib 2>/dev/null | grep -v "src/pages/(app)/(protected)/staff.tsx" || true)
+    out=$(grep -rnE --include='*.tsx' --include='*.ts' "setRole\b" src/pages src/components src/lib 2>/dev/null | grep -v "src/components/admin/StaffAccess.tsx" || true)
     [ -n "$out" ] && report HARD "§1.18" "setRole used outside the owner-only Program staff panel" "$out"
   fi
 fi

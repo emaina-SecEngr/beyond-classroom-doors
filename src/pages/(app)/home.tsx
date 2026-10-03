@@ -11,13 +11,14 @@
  * class size. Room, exact time and arrival notes are shared after a claim.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { AuthOverlay, useQuery } from 'deepspace'
 import { Badge, Button, ConfirmModal, EmptyState, useToast } from '@/components/ui'
 import { ErrorNote, Loading, Page } from '../../components/Page'
 import { callAction } from '../../lib/actions'
 import { formatSessionDate, TIME_BAND_SHORT, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import { useMe, type Me } from '../../lib/me'
+import { useAccess } from '../../components/admin/shared'
 import type { TimeBand } from '../../schemas/shared'
 
 interface SessionRow {
@@ -44,7 +45,16 @@ interface BoardItem {
 export default function HomePage() {
   const me = useMe()
   if (!me.ready) return <Loading />
-  return me.signedIn ? <LiveBoard me={me} /> : <SignedOutBoard />
+  if (!me.signedIn) return <SignedOutBoard />
+  return me.isStaff ? <StaffHome me={me} /> : <LiveBoard me={me} />
+}
+
+/** The program admin's home is Approvals; other staff see the board. */
+function StaffHome({ me }: { me: Me }) {
+  const access = useAccess()
+  if (access === null) return <Loading />
+  if (access.nonprofitAdmin) return <Navigate to="/approvals" replace />
+  return <LiveBoard me={me} />
 }
 
 // ── Signed out ───────────────────────────────────────────────────────────────
@@ -204,7 +214,7 @@ function StaffWaiting() {
     <WaitingBanner
       count={n}
       text={n === 1 ? 'volunteer application is waiting for your decision.' : 'volunteer applications are waiting for your decision.'}
-      to="/staff?tab=applicants"
+      to="/approvals"
       label="Review applications"
     />
   )

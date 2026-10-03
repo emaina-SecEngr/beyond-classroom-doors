@@ -15,6 +15,7 @@ import { ChevronDown, LogOut, Menu, X } from 'lucide-react'
 import { APP_NAME } from '../constants'
 import type { Role } from '../constants'
 import { nav } from '../nav'
+import { useAccess } from './admin/shared'
 import { cn } from '../lib/utils'
 import {
   Avatar,
@@ -36,6 +37,8 @@ export default function Navigation() {
 
   const profileReady = !isSignedIn || (!userLoading && !!user)
   const userRole = (user?.role ?? 'anonymous') as Role | 'anonymous'
+  // Only staff need the server's answer (program admin? approvals delegated?).
+  const access = useAccess(isSignedIn && userRole === 'admin')
 
   // Close the mobile menu when navigating
   useEffect(() => {
@@ -44,6 +47,13 @@ export default function Navigation() {
 
   const visibleNav = nav.filter((item) => {
     if (item.devOnly && !import.meta.env.DEV) return false
+    if (item.show) {
+      if (userRole === 'admin' && access === null) return false // wait for the server's answer
+      const programAdmin = !!access?.nonprofitAdmin
+      if (item.show === 'notProgramAdmin' && programAdmin) return false
+      if (item.show === 'approvers' && !access?.canVet) return false
+      if (item.show === 'staff' && (programAdmin || userRole !== 'admin')) return false
+    }
     if (!item.roles) return true
     if (!profileReady) return false
     if (userRole === 'admin') return true
@@ -71,7 +81,7 @@ export default function Navigation() {
     <>
       <nav data-testid="app-navigation" className="border-b border-border bg-background">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-4 px-4">
-          <Link to="/" className="font-display text-base font-semibold text-foreground">
+          <Link to={access?.nonprofitAdmin ? '/approvals' : '/'} className="font-display text-base font-semibold text-foreground">
             {APP_NAME}
           </Link>
 

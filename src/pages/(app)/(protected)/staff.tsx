@@ -1,38 +1,34 @@
 /**
- * Staff desk — program staff (DeepSpace admins) only (M2, M4, M9, R6, R7).
+ * Staff desk — program staff (DeepSpace admins) only (M4, M9, SH7).
  *
  *   Sessions         what each upcoming session still needs (staff's day job)
- *   Applicants       the vetting queue; only the nonprofit admin vets, or staff
- *                    the admin has asked for help (time-boxed, R7)
- *   Volunteers       everyone's status at a glance
- *   People & roles   program staff (nonprofit admin only), teachers (staff),
- *                    (approval is one final decision, D3b)
+ *   Volunteers       everyone's status at a glance (read-only)
+ *   Teachers         give or remove teacher access
  *   Change requests  late cancellations and reschedules from volunteers
  *   Audit log        every privileged action, append-only
  *
+ * Approving volunteers, managing staff and delegating approvals live on the
+ * Approvals page (/approvals) — the program admin's view (D3b, R6, R7).
  * Staff read these collections directly (admin read: true); every write is a
- * server action (or the worker's set-role guard) that re-checks on the server.
- * `myAccess` only decides what to SHOW.
+ * server action that re-checks on the server.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useUsers } from 'deepspace'
 import { useSearchParams } from 'react-router-dom'
 import {
   Badge,
   Button,
-  Checkbox,
   ConfirmModal,
   EmptyState,
-  Input,
-  Modal,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-  Textarea,
   useToast,
 } from '@/components/ui'
-import { ErrorNote, Fact, Field, Loading, Page } from '../../../components/Page'
+import { ErrorNote, Fact, Loading, Page } from '../../../components/Page'
+import { AuditLog } from '../../../components/admin/AuditLog'
+import type { Person, StatusRow } from '../../../components/admin/shared'
 import { SessionDetailsModal, type EditableDetails } from '../../../components/SessionDetailsModal'
 import { callAction } from '../../../lib/actions'
 import {
@@ -43,29 +39,14 @@ import {
   SESSION_STATUS_BADGE,
   SESSION_STATUS_LABELS,
   sessionTimeText,
-  todayInSanDiego,
   todaySeconds,
   topicText,
   VOLUNTEER_STATUS_BADGE,
   VOLUNTEER_STATUS_LABELS,
 } from '../../../lib/labels'
-import { useMe, type ProfileRow, type VolunteerStatusRow } from '../../../lib/me'
-import { VETTING_HELP_DEFAULT_DAYS, VETTING_HELP_MAX_DAYS, type AppRole, type SessionStatus, type TimeBand } from '../../../schemas/shared'
+import { useMe, type ProfileRow } from '../../../lib/me'
+import { type AppRole, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
-interface StatusRow extends VolunteerStatusRow {
-  identityConfirmed?: boolean | number
-  qualificationType?: string
-  clearanceExpiresAt?: number | null
-}
-interface AuditRow {
-  actorId: string
-  action: string
-  targetType: string
-  targetId: string
-  fromState: string
-  toState: string
-  reason: string
-}
 interface ChangeRow {
   sessionId: string
   volunteerId: string
@@ -76,13 +57,6 @@ interface ChangeRow {
 
 const ROLE_LABELS: Record<AppRole, string> = { teacher: 'Teacher' }
 const roleLabel = (r: string) => ROLE_LABELS[r as AppRole] ?? 'Retired role'
-
-interface Access {
-  nonprofitAdmin: boolean
-  canVet: boolean
-  vettingHelpEndsAt: number | null
-}
-const NO_ACCESS: Access = { nonprofitAdmin: false, canVet: false, vettingHelpEndsAt: null }
 
 export default function StaffPage() {
   const me = useMe()
@@ -100,37 +74,20 @@ export default function StaffPage() {
 function StaffDesk() {
   const statuses = useQuery<StatusRow>('volunteer_status', { limit: 500 })
   const profiles = useQuery<ProfileRow>('profiles', { limit: 500 })
-  const { users, usersLoaded, setRole } = useUsers()
-  const [access, setAccess] = useState<Access | null>(null)
+  const { users, usersLoaded } = useUsers()
   const [params] = useSearchParams()
   const [tab, setTab] = useState<string | null>(null)
 
-  // Display only: the server re-checks every one of these on every action.
-  useEffect(() => {
-    let live = true
-    void callAction<Access>('myAccess').then((r) => {
-      if (live) setAccess(r.success ? r.data : NO_ACCESS)
-    })
-    return () => {
-      live = false
-    }
-  }, [])
-
   const profileById = new Map(profiles.records.map((r) => [r.data.userId, r.data]))
   const nameOf = (id: string) => profileById.get(id)?.displayName || users.find((u) => u.id === id)?.name || 'Unknown user'
-  const queue = statuses.records.filter((r) => r.data.status === 'applied' || r.data.status === 'renewal_pending')
 
   return (
     <Page title="Staff desk" intro="Work with teachers so every session is ready for its volunteer, and keep an eye on changes." wide>
-      <Tabs
-        value={tab ?? params.get('tab') ?? (access?.canVet && queue.length > 0 ? 'applicants' : 'sessions')}
-        onValueChange={(v) => setTab(String(v))}
-      >
+      <Tabs value={tab ?? params.get('tab') ?? 'sessions'} onValueChange={(v) => setTab(String(v))}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          <TabsTrigger value="applicants">Applicants{queue.length ? ` (${queue.length})` : ''}</TabsTrigger>
           <TabsTrigger value="volunteers">Volunteers</TabsTrigger>
-          <TabsTrigger value="roles">People &amp; roles</TabsTrigger>
+          <TabsTrigger value="roles">Teachers</TabsTrigger>
           <TabsTrigger value="changes">Change requests</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
@@ -139,19 +96,12 @@ function StaffDesk() {
           <Sessions nameOf={nameOf} />
         </TabsContent>
 
-        <TabsContent value="applicants" className="pt-6">
-          {statuses.status === 'loading' || profiles.status === 'loading' || access === null ? (
-            <Loading />
-          ) : statuses.status === 'error' ? (
-            <ErrorNote message={statuses.error || 'Could not load applicants.'} />
-          ) : (
-            <Applicants access={access} queue={queue.map((r) => ({ ...r.data, profile: profileById.get(r.data.userId) ?? null }))} />
-          )}
-        </TabsContent>
-
         <TabsContent value="volunteers" className="pt-6">
+          <p className="mb-4 text-sm text-muted-foreground">Volunteers are approved by the program admin, or by staff the admin has delegated to.</p>
           {statuses.status === 'loading' ? (
             <Loading />
+          ) : statuses.status === 'error' ? (
+            <ErrorNote message={statuses.error || 'Could not load volunteers.'} />
           ) : statuses.records.length === 0 ? (
             <EmptyState title="No volunteers yet" description="People appear here once they submit a profile." />
           ) : (
@@ -169,14 +119,7 @@ function StaffDesk() {
         </TabsContent>
 
         <TabsContent value="roles" className="pt-6">
-          {!usersLoaded || access === null ? (
-            <Loading />
-          ) : (
-            <>
-              <ProgramStaff access={access} people={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} setRole={setRole} />
-              <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />
-            </>
-          )}
+          {!usersLoaded ? <Loading /> : <Roles users={users.map((u) => ({ id: u.id, name: u.name, email: u.email ?? '', platformRole: u.role }))} />}
         </TabsContent>
 
         <TabsContent value="changes" className="pt-6">
@@ -191,329 +134,7 @@ function StaffDesk() {
   )
 }
 
-// ── Applicants: vetting (first key) ──────────────────────────────────────────
-
-type Applicant = StatusRow & { profile: ProfileRow | null }
-
-const EMPTY_VET = {
-  identityConfirmed: false,
-  qualificationType: '',
-  licenseNumber: '',
-  licenseCheckedAt: '',
-  clearanceCompletedAt: '',
-  clearanceExpiresAt: '',
-  reason: '',
-}
-
-function Applicants({ queue, access }: { queue: Applicant[]; access: Access }) {
-  const toast = useToast()
-  const [open, setOpen] = useState<Applicant | null>(null)
-  const [form, setForm] = useState(EMPTY_VET)
-  const [busy, setBusy] = useState(false)
-  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
-
-  if (queue.length === 0) return <EmptyState title="No one waiting" description="New volunteer applications appear here." />
-
-  const notice = !access.canVet
-    ? 'Volunteers are reviewed and approved by the nonprofit admin. You can see who’s waiting; the admin can ask you to help.'
-    : access.vettingHelpEndsAt
-      ? `The nonprofit admin asked you to help review volunteers until ${formatInstant(access.vettingHelpEndsAt)}. Your decisions are final.`
-      : null
-
-  async function decide(outcome: 'approved' | 'rejected') {
-    if (!open) return
-    setBusy(true)
-    const res = await callAction('vetVolunteer', { userId: open.userId, outcome, ...form })
-    setBusy(false)
-    if (!res.success) {
-      toast.error('That didn’t go through', res.error)
-      return
-    }
-    toast.success(outcome === 'approved' ? 'Volunteer approved' : 'Application rejected', outcome === 'approved' ? 'They can claim sessions now. This decision is final.' : undefined)
-    setOpen(null)
-    setForm(EMPTY_VET)
-  }
-
-  const name = open?.profile?.displayName ?? 'this volunteer'
-
-  return (
-    <>
-      {notice && <p className="mb-4 rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">{notice}</p>}
-      <ul className="space-y-3">
-        {queue.map((a) => (
-          <li key={a.userId} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
-            <div className="min-w-0">
-              <p className="font-medium">{a.profile?.displayName ?? 'Unknown'}</p>
-              <p className="text-sm text-muted-foreground">
-                {a.profile?.profession || '—'}
-                {a.profile?.employer ? ` · ${a.profile.employer}` : ''}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Badge variant={VOLUNTEER_STATUS_BADGE[a.status]}>{VOLUNTEER_STATUS_LABELS[a.status]}</Badge>
-              {access.canVet && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setForm(EMPTY_VET)
-                    setOpen(a)
-                  }}
-                >
-                  Review
-                </Button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <Modal open={!!open} onClose={() => !busy && setOpen(null)} size="lg">
-        <Modal.Header>
-          <Modal.Title>Review {name}</Modal.Title>
-          <Modal.Description>
-            {open?.profile?.profession}
-            {open?.profile?.employer ? ` · ${open.profile.employer}` : ''}. Record what you checked. Approving is final: they can claim sessions right away.
-          </Modal.Description>
-        </Modal.Header>
-        <Modal.Body>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex items-start gap-3 text-sm sm:col-span-2">
-              <Checkbox checked={form.identityConfirmed} onCheckedChange={(c) => set('identityConfirmed', c)} />
-              <span>I confirmed this person’s identity (government photo ID, in person or by video).</span>
-            </label>
-            <Field label="Qualification" htmlFor="qualificationType" hint="For example: RN license, PE license, journeyman card, none required.">
-              <Input id="qualificationType" value={form.qualificationType} onChange={(e) => set('qualificationType', e.target.value)} maxLength={80} />
-            </Field>
-            <Field label="License number (if any)" htmlFor="licenseNumber">
-              <Input id="licenseNumber" value={form.licenseNumber} onChange={(e) => set('licenseNumber', e.target.value)} maxLength={40} />
-            </Field>
-            <Field label="License checked on" htmlFor="licenseCheckedAt">
-              <Input id="licenseCheckedAt" type="date" max={todayInSanDiego()} value={form.licenseCheckedAt} onChange={(e) => set('licenseCheckedAt', e.target.value)} />
-            </Field>
-            <Field label="Clearance completed on" htmlFor="clearanceCompletedAt" hint="TB test and background check.">
-              <Input id="clearanceCompletedAt" type="date" max={todayInSanDiego()} value={form.clearanceCompletedAt} onChange={(e) => set('clearanceCompletedAt', e.target.value)} />
-            </Field>
-            <Field label="Clearance valid until" htmlFor="clearanceExpiresAt" hint="Required to vet.">
-              <Input id="clearanceExpiresAt" type="date" min={todayInSanDiego()} value={form.clearanceExpiresAt} onChange={(e) => set('clearanceExpiresAt', e.target.value)} />
-            </Field>
-            <div className="sm:col-span-2">
-              <Field label="Note or reason" htmlFor="vetReason" hint="Required to reject. The volunteer sees a rejection reason.">
-                <Textarea id="vetReason" rows={2} value={form.reason} onChange={(e) => set('reason', e.target.value)} maxLength={500} />
-              </Field>
-            </div>
-          </div>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="ghost" onClick={() => setOpen(null)} disabled={busy}>
-            Close
-          </Button>
-          <Button variant="outline" onClick={() => void decide('rejected')} disabled={busy || !form.reason.trim()}>
-            Reject
-          </Button>
-          <Button onClick={() => void decide('approved')} loading={busy} disabled={!form.identityConfirmed || !form.clearanceExpiresAt}>
-            Approve volunteer
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </>
-  )
-}
-
-// ── Program staff (decision R6) ──────────────────────────────────────────────
-//
-// Only the nonprofit admin (the app's owner) can grant or remove staff. The page
-// asks the server who you are (myAccess) only to decide what to show; the worker
-// (AppRecordRoom + staff-guard.ts) refuses anyone else and audits every change.
-
-function ProgramStaff({ people, setRole, access }: { people: Person[]; setRole: (userId: string, role: string) => void; access: Access }) {
-  const toast = useToast()
-  const me = useMe()
-  const isNonprofitAdmin = access.nonprofitAdmin
-  const help = useQuery<{ userId: string; endsAt: number; reason: string }>('vetting_help', { limit: 200 })
-  const [confirming, setConfirming] = useState<{ person: Person; role: 'admin' | 'member' } | null>(null)
-  const [pending, setPending] = useState<{ id: string; role: 'admin' | 'member'; name: string } | null>(null)
-  const [asking, setAsking] = useState<Person | null>(null)
-  const [helpDays, setHelpDays] = useState(String(VETTING_HELP_DEFAULT_DAYS))
-  const [helpReason, setHelpReason] = useState('')
-  const [ending, setEnding] = useState<Person | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const now = Date.now() / 1000
-  const helpUntil = new Map(help.records.filter((r) => r.data.endsAt > now).map((r) => [r.data.userId, r.data.endsAt]))
-
-  async function askForHelp() {
-    if (!asking) return
-    setBusy(true)
-    const res = await callAction('grantVettingHelp', { userId: asking.id, days: Number(helpDays), reason: helpReason })
-    setBusy(false)
-    if (!res.success) {
-      toast.error('Could not ask for help', res.error)
-      return
-    }
-    toast.success(`${asking.name || asking.email} can help with vetting`, `For ${helpDays} day${helpDays === '1' ? '' : 's'}. You can end it any time.`)
-    setAsking(null)
-    setHelpReason('')
-    setHelpDays(String(VETTING_HELP_DEFAULT_DAYS))
-  }
-
-  async function endHelp() {
-    if (!ending) return
-    setBusy(true)
-    const res = await callAction('endVettingHelp', { userId: ending.id })
-    setBusy(false)
-    if (!res.success) {
-      toast.error('Could not end help', res.error)
-      return
-    }
-    toast.success('Vetting help ended')
-    setEnding(null)
-  }
-
-  // setRole is fire-and-forget over the realtime connection, so we confirm the change
-  // by watching the live user list, and report a failure if it doesn't land in time.
-  useEffect(() => {
-    if (!pending) return
-    const person = people.find((p) => p.id === pending.id)
-    if (person?.platformRole === pending.role) {
-      toast.success(pending.role === 'admin' ? `${pending.name} is now program staff` : `${pending.name} is no longer program staff`)
-      setPending(null)
-      return
-    }
-    const t = setTimeout(() => {
-      toast.error('The change didn’t go through', 'Refresh and try again.')
-      setPending(null)
-    }, 10000)
-    return () => clearTimeout(t)
-  }, [pending, people, toast])
-
-  if (!isNonprofitAdmin) {
-    return (
-      <p className="mb-6 rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
-        Only the nonprofit admin can add or remove program staff.
-      </p>
-    )
-  }
-
-  const others = people.filter((p) => p.id !== me.userId)
-
-  return (
-    <section className="mb-8">
-      <h3 className="font-semibold">Program staff</h3>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Staff work with teachers so sessions are ready. You vet volunteers; if you need a hand, ask a staff member to help for a set time. Only you can add or remove staff. Every change is in the audit log.
-      </p>
-      {others.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">No one else has signed in yet.</p>
-      ) : (
-        <ul className="mt-3 divide-y divide-border rounded-md border border-border bg-card">
-          {others.map((p) => {
-            const isStaff = p.platformRole === 'admin'
-            return (
-              <li key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{p.name || '—'}</p>
-                  <p className="truncate text-xs text-muted-foreground">{p.email}</p>
-                </div>
-                {isStaff && <Badge variant="secondary">Program staff</Badge>}
-                {isStaff && helpUntil.has(p.id) && <Badge variant="info">Helping vet until {formatDay(helpUntil.get(p.id) ?? null)}</Badge>}
-                {isStaff &&
-                  (helpUntil.has(p.id) ? (
-                    <Button size="sm" variant="ghost" onClick={() => setEnding(p)}>
-                      End vetting help
-                    </Button>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => setAsking(p)}>
-                      Ask to help vet
-                    </Button>
-                  ))}
-                <Button
-                  size="sm"
-                  variant={isStaff ? 'ghost' : 'outline'}
-                  loading={pending?.id === p.id}
-                  disabled={!!pending}
-                  onClick={() => setConfirming({ person: p, role: isStaff ? 'member' : 'admin' })}
-                >
-                  {isStaff ? 'Remove staff' : 'Make staff'}
-                </Button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      <ConfirmModal
-        open={!!confirming}
-        onClose={() => setConfirming(null)}
-        onConfirm={() => {
-          if (!confirming) return
-          const { person, role } = confirming
-          setPending({ id: person.id, role, name: person.name || person.email })
-          setRole(person.id, role)
-          setConfirming(null)
-        }}
-        title={
-          confirming
-            ? confirming.role === 'admin'
-              ? `Make ${confirming.person.name || confirming.person.email} program staff?`
-              : `Remove ${confirming.person.name || confirming.person.email} from program staff?`
-            : 'Change staff access?'
-        }
-        description={
-          confirming?.role === 'admin'
-            ? 'They’ll work with teachers on sessions, assign teacher roles, and read the audit log. They can’t review volunteers unless you ask them to help.'
-            : 'They’ll lose the staff desk immediately.'
-        }
-        confirmText={confirming?.role === 'admin' ? 'Make staff' : 'Remove staff'}
-        variant={confirming?.role === 'admin' ? 'default' : 'destructive'}
-      />
-      <Modal open={!!asking} onClose={() => !busy && setAsking(null)} size="sm">
-        <Modal.Header>
-          <Modal.Title>Ask {asking?.name || asking?.email} to help vet?</Modal.Title>
-          <Modal.Description>They can review, approve and reject volunteers until the help ends. Their decisions are final, like yours.</Modal.Description>
-        </Modal.Header>
-        <Modal.Body>
-          <div className="space-y-4">
-            <Field label={`For how many days? (1–${VETTING_HELP_MAX_DAYS})`} htmlFor="helpDays">
-              <Input id="helpDays" type="number" inputMode="numeric" min={1} max={VETTING_HELP_MAX_DAYS} value={helpDays} onChange={(e) => setHelpDays(e.target.value)} />
-            </Field>
-            <Field label="Why (recorded in the audit log)" htmlFor="helpReason" hint="For example: I’m travelling Oct 10–20.">
-              <Textarea id="helpReason" rows={2} value={helpReason} onChange={(e) => setHelpReason(e.target.value)} maxLength={300} />
-            </Field>
-          </div>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="ghost" onClick={() => setAsking(null)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => void askForHelp()}
-            loading={busy}
-            disabled={!helpReason.trim() || !(Number(helpDays) >= 1 && Number(helpDays) <= VETTING_HELP_MAX_DAYS)}
-          >
-            Ask for help
-          </Button>
-        </Modal.Footer>
-      </Modal>
-      <ConfirmModal
-        open={!!ending}
-        onClose={() => !busy && setEnding(null)}
-        onConfirm={() => void endHelp()}
-        title={`End ${ending?.name || ending?.email || 'this'}’s vetting help?`}
-        description="They’ll stop being able to vet right away."
-        confirmText="End help"
-        loading={busy}
-      />
-    </section>
-  )
-}
-
 // ── People & roles ───────────────────────────────────────────────────────────
-
-interface Person {
-  id: string
-  name: string
-  email: string
-  platformRole: string
-}
 
 function Roles({ users }: { users: Person[] }) {
   const toast = useToast()
@@ -740,42 +361,3 @@ function ChangeRequests({ nameOf }: { nameOf: (id: string) => string }) {
   )
 }
 
-// ── Audit log ────────────────────────────────────────────────────────────────
-
-function AuditLog({ nameOf }: { nameOf: (id: string) => string }) {
-  const { records, status, error } = useQuery<AuditRow>('audit_log', { limit: 300 })
-  if (status === 'loading') return <Loading />
-  if (status === 'error') return <ErrorNote message={error || 'Could not load the audit log.'} />
-  const rows = [...records].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  if (rows.length === 0) return <EmptyState title="Nothing recorded yet" description="Every privileged action is recorded here." />
-  return (
-    <div className="overflow-x-auto rounded-md border border-border bg-card">
-      <table className="w-full min-w-[640px] text-left text-sm">
-        <thead className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2 font-medium">When</th>
-            <th className="px-4 py-2 font-medium">Who</th>
-            <th className="px-4 py-2 font-medium">Action</th>
-            <th className="px-4 py-2 font-medium">Target</th>
-            <th className="px-4 py-2 font-medium">Change</th>
-            <th className="px-4 py-2 font-medium">Reason</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((r) => (
-            <tr key={r.recordId}>
-              <td className="whitespace-nowrap px-4 py-2 tabular-nums">{formatInstant(r.createdAt)}</td>
-              <td className="px-4 py-2">{nameOf(r.data.actorId)}</td>
-              <td className="px-4 py-2">{r.data.action.replace(/_/g, ' ')}</td>
-              <td className="px-4 py-2">{r.data.targetType === 'volunteer' || r.data.targetType === 'user' ? nameOf(r.data.targetId) : `${r.data.targetType} ${r.data.targetId.slice(0, 8)}`}</td>
-              <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
-                {r.data.fromState || '—'} → {r.data.toState || '—'}
-              </td>
-              <td className="px-4 py-2 text-muted-foreground">{r.data.reason || ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}

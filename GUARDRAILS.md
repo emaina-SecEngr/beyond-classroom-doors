@@ -114,8 +114,8 @@ on the user's behalf.
 18. **Only the nonprofit admin (app owner) changes who is staff** (decision R6).
     DeepSpace's built-in set-role message lets any admin set any role, unaudited;
     `AppRecordRoom.webSocketMessage` in `worker.ts` must keep checking it with
-    `decideSetRole` (src/server/staff-guard.ts). Never expose `useUsers().setRole`
-    outside the owner-only Program staff panel.
+    `decideSetRole` (src/server/staff-guard.ts). Never call `useUsers().setRole`
+    outside src/components/admin/StaffAccess.tsx (the owner-only panel).
 
 ---
 
