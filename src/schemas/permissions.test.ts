@@ -152,3 +152,15 @@ describe('schools (D9)', () => {
     }
   })
 })
+
+describe('teacher_invites (D10)', () => {
+  const s = S.teacher_invites
+  it('members cannot read invites (they hold other people’s emails)', () => {
+    expect(canRead(s, 'member', rec({ email: 'x@y.z' }), VOL)).toBe(false)
+  })
+  it('staff can read but not write directly', () => {
+    expect(canRead(s, 'admin', rec({ email: 'x@y.z' }), STAFF)).toBe(true)
+    expect(canCreate(s, 'admin')).toBe(false)
+    expect(canUpdate(s, 'admin', rec({ email: 'x@y.z' }), STAFF)).toBe(false)
+  })
+})

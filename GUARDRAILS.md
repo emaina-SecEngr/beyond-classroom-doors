@@ -242,6 +242,8 @@ Extend the scaffold's three specs; don't add parallel suites.
     admin grants help.
 19. Only the program admin creates or edits schools; a teacher needs an active school;
     a session's school is taken from the teacher's assignment, never from the request.
+20. A teacher invite is accepted only by the signed-in account whose verified email
+    matches it; members can't read invites; a revoked invite never grants access.
 
 ---
 

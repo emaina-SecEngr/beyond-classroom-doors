@@ -2,14 +2,26 @@
  * Schools in the district — the program admin adds, edits and (de)activates them
  * (D9). Inactive schools keep their history but take no new teachers or sessions.
  * The createSchool / updateSchool actions refuse anyone but the program admin.
+ *
+ * Each school lists its teachers (D10): those with access, and those invited by
+ * name + school email who haven't signed in yet. Signing in with that email gives
+ * them access automatically.
  */
 import { useState } from 'react'
-import { Badge, Button, Checkbox, EmptyState, Input, Modal, useToast } from '@/components/ui'
+import { useQuery, useUsers } from 'deepspace'
+import { Badge, Button, Checkbox, ConfirmModal, EmptyState, Input, Modal, useToast } from '@/components/ui'
 import { ErrorNote, Field, Loading } from '../Page'
 import { callAction } from '../../lib/actions'
 import { useSchools, type SchoolRecord } from '../../lib/schools'
 
 const EMPTY = { name: '', district: '', city: '', address: '', active: true }
+
+interface InviteRow {
+  email: string
+  name: string
+  schoolId: string
+  status: 'pending' | 'accepted' | 'revoked'
+}
 
 export function Schools({ editable }: { editable: boolean }) {
   const toast = useToast()
@@ -17,6 +29,12 @@ export function Schools({ editable }: { editable: boolean }) {
   const [editing, setEditing] = useState<SchoolRecord | 'new' | null>(null)
   const [form, setForm] = useState(EMPTY)
   const [busy, setBusy] = useState(false)
+  const assignments = useQuery<{ userId: string; role: string; schoolId?: string }>('role_assignments', { limit: 500 })
+  const invites = useQuery<InviteRow>('teacher_invites', { limit: 500 })
+  const { users } = useUsers()
+  const [inviting, setInviting] = useState<SchoolRecord | null>(null)
+  const [invite, setInvite] = useState({ name: '', email: '' })
+  const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null)
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   function open(s: SchoolRecord | 'new') {
@@ -40,6 +58,40 @@ export function Schools({ editable }: { editable: boolean }) {
     setEditing(null)
   }
 
+  async function sendInvite() {
+    if (!inviting) return
+    setBusy(true)
+    const res = await callAction<{ accepted: boolean }>('inviteTeacher', { ...invite, schoolId: inviting.id })
+    setBusy(false)
+    if (!res.success) {
+      toast.error('Could not add the teacher', res.error)
+      return
+    }
+    toast.success(
+      res.data.accepted ? `${invite.name} now has teacher access` : `${invite.name} added to ${inviting.name}`,
+      res.data.accepted ? 'They had already signed in, so access is ready.' : 'They get access when they sign in with that email.',
+    )
+    setInviting(null)
+    setInvite({ name: '', email: '' })
+  }
+
+  async function revoke() {
+    if (!revoking) return
+    setBusy(true)
+    const res = await callAction('revokeTeacherInvite', { inviteId: revoking.id })
+    setBusy(false)
+    if (!res.success) {
+      toast.error('Could not cancel the invite', res.error)
+      return
+    }
+    toast.success('Invite cancelled')
+    setRevoking(null)
+  }
+
+  const userName = (id: string) => users.find((u) => u.id === id)?.name || users.find((u) => u.id === id)?.email || 'Teacher'
+  const teachersAt = (schoolId: string) => assignments.records.filter((r) => r.data.role === 'teacher' && r.data.schoolId === schoolId)
+  const pendingAt = (schoolId: string) => invites.records.filter((r) => r.data.status === 'pending' && r.data.schoolId === schoolId)
+
   if (status === 'loading') return <Loading />
   if (status === 'error') return <ErrorNote message={error || 'Could not load schools.'} />
 
@@ -59,22 +111,100 @@ export function Schools({ editable }: { editable: boolean }) {
         />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border bg-card">
-          {schools.map((s) => (
-            <li key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium">{s.name}</p>
-                <p className="text-xs text-muted-foreground">{[s.district, s.address, s.city].filter(Boolean).join(' · ') || '—'}</p>
-              </div>
-              {!s.active && <Badge variant="outline">Inactive</Badge>}
-              {editable && (
-                <Button size="sm" variant="outline" onClick={() => open(s)}>
-                  Edit
-                </Button>
-              )}
-            </li>
-          ))}
+          {schools.map((s) => {
+            const teachers = teachersAt(s.id)
+            const pending = pendingAt(s.id)
+            return (
+              <li key={s.id} className="px-4 py-4">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{s.name}</p>
+                    <p className="text-xs text-muted-foreground">{[s.district, s.address, s.city].filter(Boolean).join(' · ') || '—'}</p>
+                  </div>
+                  {!s.active && <Badge variant="outline">Inactive</Badge>}
+                  {editable && (
+                    <>
+                      {!!s.active && (
+                        <Button size="sm" variant="outline" onClick={() => setInviting(s)}>
+                          Add teacher
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => open(s)}>
+                        Edit
+                      </Button>
+                    </>
+                  )}
+                </div>
+                <div className="mt-3 border-l-2 border-border pl-3 text-sm">
+                  {teachers.length === 0 && pending.length === 0 ? (
+                    <p className="text-muted-foreground">No teachers yet.</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {teachers.map((t) => (
+                        <li key={t.recordId} className="flex items-center gap-2">
+                          <span>{userName(t.data.userId)}</span>
+                          <Badge variant="success" size="sm">
+                            Has access
+                          </Badge>
+                        </li>
+                      ))}
+                      {pending.map((i) => (
+                        <li key={i.recordId} className="flex flex-wrap items-center gap-2">
+                          <span>{i.data.name}</span>
+                          <span className="text-xs text-muted-foreground">{i.data.email}</span>
+                          <Badge variant="warning" size="sm">
+                            Invited
+                          </Badge>
+                          {editable && (
+                            <button type="button" className="text-xs text-muted-foreground underline-offset-4 hover:underline" onClick={() => setRevoking({ id: i.recordId, name: i.data.name })}>
+                              Cancel invite
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </li>
+            )
+          })}
         </ul>
       )}
+
+      <Modal open={!!inviting} onClose={() => !busy && setInviting(null)} size="sm">
+        <Modal.Header>
+          <Modal.Title>Add a teacher at {inviting?.name}</Modal.Title>
+          <Modal.Description>When they sign in with this school email, they get teacher access here automatically.</Modal.Description>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="space-y-4">
+            <Field label="Teacher’s name" htmlFor="inv-name">
+              <Input id="inv-name" value={invite.name} onChange={(e) => setInvite((v) => ({ ...v, name: e.target.value }))} maxLength={80} />
+            </Field>
+            <Field label="School email" htmlFor="inv-email" hint="The email they’ll sign in with.">
+              <Input id="inv-email" type="email" value={invite.email} onChange={(e) => setInvite((v) => ({ ...v, email: e.target.value }))} maxLength={120} />
+            </Field>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="ghost" onClick={() => setInviting(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={() => void sendInvite()} loading={busy} disabled={!invite.name.trim() || !invite.email.includes('@')}>
+            Add teacher
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <ConfirmModal
+        open={!!revoking}
+        onClose={() => !busy && setRevoking(null)}
+        onConfirm={() => void revoke()}
+        title={`Cancel ${revoking?.name ?? 'this'}’s invite?`}
+        description="They won’t get teacher access when they sign in. You can add them again later."
+        confirmText="Cancel invite"
+        loading={busy}
+      />
 
       <Modal open={!!editing} onClose={() => !busy && setEditing(null)}>
         <Modal.Header>

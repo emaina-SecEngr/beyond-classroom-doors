@@ -320,6 +320,49 @@ describe('schools in the district (D9, standing test 19)', () => {
   })
 })
 
+describe('teacher invites (D10, standing test 20)', () => {
+  const invite = (who: string, extra: Row = {}) =>
+    call('inviteTeacher', who, { name: 'Ms. Rivera', email: 'Rivera@Lincoln.edu', schoolId: SCHOOL, ...extra })
+  it('staff can invite a teacher by name and email to a school; members cannot', async () => {
+    expect(await invite('u_vol')).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await invite('u_staff')).toMatchObject({ success: true, data: { accepted: false } })
+    expect(rows('teacher_invites')[0]).toMatchObject({ email: 'rivera@lincoln.edu', name: 'Ms. Rivera', schoolId: SCHOOL, status: 'pending' })
+  })
+  it('signing in with the invited email gives teacher access at that school', async () => {
+    await invite(OWNER)
+    db.get('users')!.set('u_rivera', { email: 'rivera@lincoln.edu', name: 'Rivera', role: 'member' })
+    expect(await call('acceptTeacherInvite', 'u_rivera')).toMatchObject({ success: true, data: { accepted: true, schoolName: 'Lincoln High' } })
+    expect(row('role_assignments', 'u_rivera')).toMatchObject({ role: 'teacher', schoolId: SCHOOL })
+    expect(rows('teacher_invites')[0]).toMatchObject({ status: 'accepted', acceptedBy: 'u_rivera' })
+    expect((await call('createSessionRequest', 'u_rivera', { grade: '9', topic: 'healthcare', sessionDate: futureDate(9), timeBand: 'morning' })).success).toBe(true)
+  })
+  it('someone else signing in gets nothing — the server compares their verified account email, not anything they send', async () => {
+    await invite(OWNER)
+    expect(await call('acceptTeacherInvite', 'u_vol', { email: 'rivera@lincoln.edu' })).toMatchObject({ success: true, data: { accepted: false } })
+    expect(row('role_assignments', 'u_vol')).toBeUndefined()
+  })
+  it('a revoked invite is not accepted', async () => {
+    const r = await invite(OWNER)
+    await call('revokeTeacherInvite', 'u_staff', { inviteId: (r as { data: { inviteId: string } }).data.inviteId })
+    db.get('users')!.set('u_rivera', { email: 'rivera@lincoln.edu', role: 'member' })
+    expect(await call('acceptTeacherInvite', 'u_rivera')).toMatchObject({ data: { accepted: false } })
+    expect(row('role_assignments', 'u_rivera')).toBeUndefined()
+  })
+  it('inviting someone who already signed in gives access straight away', async () => {
+    db.get('users')!.set('u_rivera', { email: 'rivera@lincoln.edu', role: 'member' })
+    expect(await invite(OWNER)).toMatchObject({ success: true, data: { accepted: true } })
+    expect(row('role_assignments', 'u_rivera')).toMatchObject({ role: 'teacher', schoolId: SCHOOL })
+  })
+  it('re-inviting the same email updates the one invite (no duplicates), and bad input is refused', async () => {
+    await invite(OWNER)
+    const other = await call('createSchool', OWNER, { name: 'Hoover High' })
+    await invite(OWNER, { schoolId: (other as { data: { schoolId: string } }).data.schoolId })
+    expect(rows('teacher_invites').length).toBe(1)
+    expect(await invite(OWNER, { email: 'not-an-email' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await invite(OWNER, { schoolId: 'nope' })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+})
+
 describe('session requests (standing test 6)', () => {
   it('only teachers can post requests', async () => {
     const r = await call('createSessionRequest', 'u_vol', { grade: '9', topic: 'technology', sessionDate: futureDate(5), timeBand: 'midday' })

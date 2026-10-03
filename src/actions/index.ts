@@ -102,6 +102,20 @@ async function activeClaimFor(tools: Parameters<ActionHandler>[0]['tools'], sess
   return r.success && r.data.records.length ? r.data.records[0] : null
 }
 
+/** Turn a pending invite into teacher access at its school (D10). */
+async function acceptInvite(
+  tools: Parameters<ActionHandler>[0]['tools'],
+  targetId: string,
+  inviteId: string,
+  invite: { name: string; schoolId: string; invitedBy: string },
+  schoolName: string,
+) {
+  await must(tools.create('role_assignments', { userId: targetId, role: 'teacher', assignedBy: invite.invitedBy, schoolId: invite.schoolId }, targetId), 'assign from invite')
+  await must(tools.update('teacher_invites', inviteId, { status: 'accepted', acceptedBy: targetId }), 'accept invite')
+  await audit(tools, { actorId: targetId, action: 'accept_invite', targetType: 'invite', targetId: inviteId, fromState: 'pending', toState: `teacher@${invite.schoolId}` })
+  await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `Welcome. You have teacher access at ${schoolName}.` })
+}
+
 export const actions: Record<string, ActionHandler<Env>> = {
   // ── R6 · Is the caller the nonprofit admin? (display only — the worker enforces) ──
   myAccess: ({ userId, tools, env }) =>
@@ -218,6 +232,72 @@ export const actions: Record<string, ActionHandler<Env>> = {
         toState: `${next.name}${next.active ? '' : ' (inactive)'}`,
       })
       return ok({ schoolId })
+    }),
+
+  // ── D10 · Teacher invites: list a school's teachers before they sign in ───
+  inviteTeacher: ({ userId, params, tools, env }) =>
+    run('inviteTeacher', async () => {
+      await requireStaff(tools, userId, env.OWNER_USER_ID)
+      const name = str(params, 'name', { required: true, max: 80 })
+      const email = str(params, 'email', { required: true, max: 120 }).toLowerCase()
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) refuse('Enter a valid email address.', 'invalid_input')
+      const schoolId = str(params, 'schoolId', { required: true, max: 100 })
+      const school = await getData<School>(tools, 'schools', schoolId)
+      if (!school) refuse('Choose a school.', 'invalid_input')
+      if (!school!.active) refuse(`${school!.name} is inactive.`, 'invalid_input')
+
+      // One invite per email: re-inviting updates the existing row (keeps history in the audit log).
+      const existing = await tools.query<{ status: string }>('teacher_invites', { where: { email }, limit: 1 })
+      const prior = existing.success ? existing.data.records[0] : undefined
+      const data = { email, name, schoolId, invitedBy: userId, status: 'pending', acceptedBy: '' }
+      const inviteId = prior
+        ? (await must(tools.update('teacher_invites', prior.recordId, data), 'update invite')).recordId
+        : (await must(tools.create('teacher_invites', data), 'create invite')).recordId
+      await audit(tools, { actorId: userId, action: 'invite_teacher', targetType: 'invite', targetId: inviteId, toState: `pending@${schoolId}`, reason: name })
+
+      // Already signed in with that email? Give access now instead of waiting.
+      const users = await tools.query<{ email?: string }>('users', { where: { email }, limit: 1 })
+      const match = users.success ? users.data.records[0] : undefined
+      if (match) {
+        await acceptInvite(tools, match.recordId, inviteId, { name, schoolId, invitedBy: userId }, school!.name)
+        return ok({ inviteId, accepted: true })
+      }
+      return ok({ inviteId, accepted: false })
+    }),
+
+  revokeTeacherInvite: ({ userId, params, tools, env }) =>
+    run('revokeTeacherInvite', async () => {
+      await requireStaff(tools, userId, env.OWNER_USER_ID)
+      const inviteId = str(params, 'inviteId', { required: true, max: 100 })
+      const invite = await getData<{ status: string }>(tools, 'teacher_invites', inviteId)
+      if (!invite) refuse('Invite not found.', 'not_found')
+      if (invite!.status !== 'pending') refuse(`This invite was already ${invite!.status}.`, 'stale_state')
+      await must(tools.update('teacher_invites', inviteId, { status: 'revoked' }), 'revoke invite')
+      await audit(tools, { actorId: userId, action: 'revoke_invite', targetType: 'invite', targetId: inviteId, fromState: 'pending', toState: 'revoked' })
+      return ok({ inviteId })
+    }),
+
+  /**
+   * Called by the app once after sign-in. Matches the caller's VERIFIED account email
+   * (their users row, written by the platform) against pending invites — the browser
+   * sends nothing but its token.
+   */
+  acceptTeacherInvite: ({ userId, tools }) =>
+    run('acceptTeacherInvite', async () => {
+      if (await appRoleOf(tools, userId)) return ok({ accepted: false })
+      const me = await getData<{ email?: string }>(tools, 'users', userId)
+      const email = (me?.email ?? '').trim().toLowerCase()
+      if (!email) return ok({ accepted: false })
+      const found = await tools.query<{ email: string; name: string; schoolId: string; invitedBy: string; status: string }>('teacher_invites', {
+        where: { email, status: 'pending' },
+        limit: 1,
+      })
+      const invite = found.success ? found.data.records[0] : undefined
+      if (!invite) return ok({ accepted: false })
+      const school = await getData<School>(tools, 'schools', invite.data.schoolId)
+      if (!school || !school.active) return ok({ accepted: false })
+      await acceptInvite(tools, userId, invite.recordId, invite.data, school.name)
+      return ok({ accepted: true, schoolName: school.name })
     }),
 
   // ── M4 · Staff assign app roles (teacher) ─────────────────────────────────

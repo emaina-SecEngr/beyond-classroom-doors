@@ -16,6 +16,10 @@ import { APP_NAME } from '../constants'
 import type { Role } from '../constants'
 import { nav } from '../nav'
 import { useAccess } from './admin/shared'
+import { callAction } from '../lib/actions'
+
+// Users we've already checked for a teacher invite in this page load (D10).
+const inviteChecked = new Set<string>()
 import { cn } from '../lib/utils'
 import {
   Avatar,
@@ -27,6 +31,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  useToast,
 } from './ui'
 
 export default function Navigation() {
@@ -39,6 +44,18 @@ export default function Navigation() {
   const userRole = (user?.role ?? 'anonymous') as Role | 'anonymous'
   // Only staff need the server's answer (program admin? approvals delegated?).
   const access = useAccess(isSignedIn && userRole === 'admin')
+
+  // D10: after sign-in, accept a pending teacher invite for this account, if any.
+  // The server matches the account's verified email; the browser sends nothing else.
+  const toast = useToast()
+  const uid = user?.id
+  useEffect(() => {
+    if (!isSignedIn || !uid || userRole === 'admin' || inviteChecked.has(uid)) return
+    inviteChecked.add(uid)
+    void callAction<{ accepted: boolean; schoolName?: string }>('acceptTeacherInvite').then((r) => {
+      if (r.success && r.data.accepted) toast.success('Teacher access is ready', `You’re set up at ${r.data.schoolName ?? 'your school'}. Open the teacher desk from the board.`)
+    })
+  }, [isSignedIn, uid, userRole, toast])
 
   // Close the mobile menu when navigating
   useEffect(() => {
