@@ -18,6 +18,11 @@
 
 export const THEMES = [
   {
+    id: 'front-office',
+    label: 'Front office',
+    description: 'Beyond Classroom Doors: paper-cream with chalkboard green; Fraunces + Source Sans 3.',
+  },
+  {
     id: 'slate',
     label: 'Slate',
     description: 'Neutral dark placeholder default. Replace with your own theme.',

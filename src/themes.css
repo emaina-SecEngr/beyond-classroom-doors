@@ -44,3 +44,48 @@
   --color-shell: #fafafa;
   --color-shell-panel: #ffffff;
 }
+
+/* Front office — Beyond Classroom Doors (decisions.md, Design Direction).
+ * A paper room schedule on a school front-office counter: warm paper-cream
+ * surfaces, deep chalkboard-green for actions, ink-dark text. Light only. */
+[data-theme="front-office"] {
+  color-scheme: light;
+  --color-background: #f6f1e7;
+  --color-foreground: #1d2621;
+  --color-card: #fffcf5;
+  --color-card-foreground: #1d2621;
+  --color-popover: #fffcf5;
+  --color-popover-foreground: #1d2621;
+  --color-primary: #1f4a37;
+  --color-primary-foreground: #fbf7ee;
+  --color-secondary: #ebe4d4;
+  --color-secondary-foreground: #1d2621;
+  --color-muted: #eee7d8;
+  --color-muted-foreground: #56645c;
+  --color-accent: #e3ece5;
+  --color-accent-foreground: #1d2621;
+  --color-destructive: #a8321f;
+  --color-destructive-foreground: #fffcf5;
+  --color-border: #dcd2bf;
+  --color-input: #d3c8b2;
+  --color-ring: #1f4a37;
+  --color-success: #2f6b4a;
+  --color-success-foreground: #fffcf5;
+  --color-warning: #b26a12;
+  --color-warning-foreground: #fffcf5;
+  --color-info: #2d5a7b;
+  --color-info-foreground: #fffcf5;
+  --radius: 0.25rem;
+  --shadow-card: 0 1px 2px 0 rgba(60, 45, 20, 0.05);
+  --shadow-card-hover: 0 2px 8px 0 rgba(60, 45, 20, 0.08);
+  --color-shell: #efe8da;
+  --color-shell-panel: #fffcf5;
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+}
+
+/* Headings in the printed-schedule voice. */
+.font-display {
+  font-family: var(--font-display, ui-serif, Georgia, serif);
+  font-optical-sizing: auto;
+}
