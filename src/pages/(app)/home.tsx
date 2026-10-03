@@ -18,7 +18,7 @@ import { ErrorNote, Loading, Page } from '../../components/Page'
 import { callAction } from '../../lib/actions'
 import { formatSessionDate, TIME_BAND_SHORT, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import { useMe, type Me } from '../../lib/me'
-import { useAccess } from '../../components/admin/shared'
+import { ADMIN_LANDED_KEY, useAccess } from '../../components/admin/shared'
 import type { TimeBand } from '../../schemas/shared'
 
 interface SessionRow {
@@ -49,12 +49,23 @@ export default function HomePage() {
   return me.isStaff ? <StaffHome me={me} /> : <LiveBoard me={me} />
 }
 
-/** The program admin's home is Approvals; other staff see the board. */
+/**
+ * The program admin starts at Approvals: the first time they reach the board in a
+ * browser session they're taken there. After that, Board shows the board, so the
+ * whole app stays one click away. (Per-tab convenience only; nothing security-related.)
+ */
 function StaffHome({ me }: { me: Me }) {
   const access = useAccess()
   if (access === null) return <Loading />
-  if (access.nonprofitAdmin) return <Navigate to="/approvals" replace />
+  if (access.nonprofitAdmin && !alreadyLanded()) return <Navigate to="/approvals" replace />
   return <LiveBoard me={me} />
+}
+function alreadyLanded(): boolean {
+  try {
+    return !!sessionStorage.getItem(ADMIN_LANDED_KEY)
+  } catch {
+    return true // storage blocked: never trap the admin in a redirect
+  }
 }
 
 // ── Signed out ───────────────────────────────────────────────────────────────
@@ -163,7 +174,7 @@ function LiveBoard({ me }: { me: Me }) {
 function DeskLinks({ me }: { me: Me }) {
   const links: { to: string; label: string }[] = []
   if (me.appRole === 'teacher') links.push({ to: '/teach', label: 'Teacher desk' })
-  if (me.isStaff) links.push({ to: '/staff', label: 'Staff desk' })
+  if (me.isStaff) links.push({ to: '/approvals', label: 'Approvals' }, { to: '/staff', label: 'Staff desk' })
   if (!me.appRole && !me.isStaff) links.push({ to: '/my-sessions', label: 'My sessions' })
   return (
     <>

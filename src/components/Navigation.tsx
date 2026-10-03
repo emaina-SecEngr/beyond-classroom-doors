@@ -52,7 +52,6 @@ export default function Navigation() {
       const programAdmin = !!access?.nonprofitAdmin
       if (item.show === 'notProgramAdmin' && programAdmin) return false
       if (item.show === 'approvers' && !access?.canVet) return false
-      if (item.show === 'staff' && (programAdmin || userRole !== 'admin')) return false
     }
     if (!item.roles) return true
     if (!profileReady) return false
@@ -81,7 +80,7 @@ export default function Navigation() {
     <>
       <nav data-testid="app-navigation" className="border-b border-border bg-background">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-4 px-4">
-          <Link to={access?.nonprofitAdmin ? '/approvals' : '/'} className="font-display text-base font-semibold text-foreground">
+          <Link to="/" className="font-display text-base font-semibold text-foreground">
             {APP_NAME}
           </Link>
 

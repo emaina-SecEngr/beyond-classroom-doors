@@ -29,6 +29,17 @@ export function useAccess(enabled = true): Access | null {
   return enabled ? access : NO_ACCESS
 }
 
+/** Set when the program admin has seen Approvals this browser session (see home.tsx). */
+export const ADMIN_LANDED_KEY = 'bcd:admin-landed'
+
+export function markAdminLanded(): void {
+  try {
+    sessionStorage.setItem(ADMIN_LANDED_KEY, '1')
+  } catch {
+    // Storage blocked: home.tsx treats that as "already landed", so no redirect loop.
+  }
+}
+
 export interface Person {
   id: string
   name: string

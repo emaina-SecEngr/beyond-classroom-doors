@@ -2,6 +2,7 @@
  * Approvals — the program admin's page (D3b, R6, R7).
  *
  *   Waiting      applications to approve (final) or reject
+ *   Approved     read-only roster of approved volunteers
  *   Delegate     hand approvals to a staff member for a set time; add/remove staff
  *   Decisions    every approval, rejection and delegation, from the audit log
  *
@@ -10,15 +11,16 @@
  * The server (vetVolunteer, grantVettingHelp, the worker's set-role guard) is what
  * actually decides who may act; this page just shows the right tools.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useUsers } from 'deepspace'
 import { useSearchParams } from 'react-router-dom'
 import { EmptyState, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui'
 import { ErrorNote, Loading, Page } from '../../../components/Page'
+import { ApprovedVolunteers } from '../../../components/admin/ApprovedVolunteers'
 import { AuditLog } from '../../../components/admin/AuditLog'
 import { ReviewQueue } from '../../../components/admin/ReviewQueue'
 import { ProgramStaff } from '../../../components/admin/StaffAccess'
-import { useAccess, type Access, type StatusRow } from '../../../components/admin/shared'
+import { markAdminLanded, useAccess, type Access, type StatusRow } from '../../../components/admin/shared'
 import { formatInstant } from '../../../lib/labels'
 import { useMe, type ProfileRow } from '../../../lib/me'
 
@@ -43,6 +45,10 @@ export default function ApprovalsPage() {
 
 function ApprovalsDesk({ access }: { access: Access }) {
   const { nonprofitAdmin, vettingHelpEndsAt: delegatedUntil } = access
+  // After this, Board shows the board for the rest of the session (home.tsx).
+  useEffect(() => {
+    if (nonprofitAdmin) markAdminLanded()
+  }, [nonprofitAdmin])
   const statuses = useQuery<StatusRow>('volunteer_status', { limit: 500 })
   const profiles = useQuery<ProfileRow>('profiles', { limit: 500 })
   const { users } = useUsers()
@@ -54,6 +60,8 @@ function ApprovalsDesk({ access }: { access: Access }) {
   const queue = statuses.records
     .filter((r) => r.data.status === 'applied' || r.data.status === 'renewal_pending' || r.data.status === 'vetted')
     .map((r) => ({ ...r.data, profile: profileById.get(r.data.userId) ?? null }))
+
+  const approvedCount = statuses.records.filter((r) => r.data.status === 'approved').length
 
   const waiting =
     statuses.status === 'loading' || profiles.status === 'loading' ? (
@@ -78,11 +86,15 @@ function ApprovalsDesk({ access }: { access: Access }) {
         <Tabs value={tab ?? params.get('tab') ?? 'waiting'} onValueChange={(v) => setTab(String(v))}>
           <TabsList className="flex-wrap">
             <TabsTrigger value="waiting">Waiting{queue.length ? ` (${queue.length})` : ''}</TabsTrigger>
+            <TabsTrigger value="approved">Approved{approvedCount ? ` (${approvedCount})` : ''}</TabsTrigger>
             <TabsTrigger value="delegate">Delegate &amp; staff</TabsTrigger>
             <TabsTrigger value="decisions">Decisions</TabsTrigger>
           </TabsList>
           <TabsContent value="waiting" className="pt-6">
             {waiting}
+          </TabsContent>
+          <TabsContent value="approved" className="pt-6">
+            <ApprovedVolunteers nameOf={nameOf} />
           </TabsContent>
           <TabsContent value="delegate" className="pt-6">
             <ProgramStaff access={access} />
