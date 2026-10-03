@@ -53,6 +53,7 @@ import {
   statusOf,
   str,
 } from './lib'
+import { TEST_DISTRICT, TEST_MARK, TEST_SCHOOLS, TEST_SESSIONS, testSessionDate, testTeacherName } from './test-data'
 import { fetchUserFile, isFilePath, LICENSE_MAX_BYTES, LICENSE_MIMES, toBase64 } from '../server/user-files'
 
 interface Profile extends Record<string, unknown> {
@@ -246,6 +247,36 @@ async function acceptInvite(
   await notify(tools, { recipientId: targetId, kind: 'status_changed', title: `Welcome. You have teacher access at ${schoolName}.` })
 }
 
+/**
+ * Create or refresh a teacher invite (D10) and, if someone has already signed in with
+ * that email, give them teacher access now. Shared by inviteTeacher and seedTestData.
+ */
+async function upsertInvite(
+  tools: Parameters<ActionHandler>[0]['tools'],
+  actorId: string,
+  invite: { name: string; email: string; schoolId: string },
+  schoolName: string,
+): Promise<{ inviteId: string; accepted: boolean }> {
+  const { name, email, schoolId } = invite
+  // One invite per email: re-inviting updates the existing row (keeps history in the audit log).
+  const existing = await tools.query<{ status: string }>('teacher_invites', { where: { email }, limit: 1 })
+  const prior = existing.success ? existing.data.records[0] : undefined
+  const data = { email, name, schoolId, invitedBy: actorId, status: 'pending', acceptedBy: '' }
+  const inviteId = prior
+    ? (await must(tools.update('teacher_invites', prior.recordId, data), 'update invite')).recordId
+    : (await must(tools.create('teacher_invites', data), 'create invite')).recordId
+  await audit(tools, { actorId, action: 'invite_teacher', targetType: 'invite', targetId: inviteId, toState: `pending@${schoolId}`, reason: name })
+
+  // Already signed in with that email? Give access now instead of waiting.
+  const users = await tools.query<{ email?: string }>('users', { where: { email }, limit: 1 })
+  const match = users.success ? users.data.records[0] : undefined
+  if (match) {
+    await acceptInvite(tools, match.recordId, inviteId, { name, schoolId, invitedBy: actorId }, schoolName)
+    return { inviteId, accepted: true }
+  }
+  return { inviteId, accepted: false }
+}
+
 export const actions: Record<string, ActionHandler<Env>> = {
   // ── R6 · Is the caller the nonprofit admin? (display only — the worker enforces) ──
   myAccess: ({ userId, tools, env }) =>
@@ -338,6 +369,97 @@ export const actions: Record<string, ActionHandler<Env>> = {
       return ok({ status: status.status })
     }),
 
+  // ── D16 · Test data for manual testing: San Diego Unified schools ─────────
+  /**
+   * Nonprofit admin only. Safe to run more than once:
+   *   1. adds the five TEST_SCHOOLS that don't exist yet (by name);
+   *   2. invites each email in `teacherEmails` to one of those schools, in order;
+   *   3. gives every test teacher who has signed in (invite accepted) and has no
+   *      sessions yet two open sample sessions marked "[Test data]".
+   * Run it once with the emails, sign in as each test teacher, then run it again.
+   */
+  seedTestData: ({ userId, params, tools, env }) =>
+    run('seedTestData', async () => {
+      requireNonprofitAdmin(userId, env.OWNER_USER_ID)
+      const raw = Array.isArray(params.teacherEmails) ? params.teacherEmails : []
+      if (raw.length > TEST_SCHOOLS.length) refuse(`Up to ${TEST_SCHOOLS.length} test teachers, one per school.`, 'invalid_input')
+      const emails = raw.map((e) => (typeof e === 'string' ? e.trim().toLowerCase() : '')).filter(Boolean)
+      for (const e of emails) if (e.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) refuse(`“${e}” isn’t a valid email address.`, 'invalid_input')
+      if (new Set(emails).size !== emails.length) refuse('Use a different email for each test teacher.', 'invalid_input')
+
+      // 1. Schools
+      const schools: { id: string; name: string; active: boolean }[] = []
+      let schoolsAdded = 0
+      for (const s of TEST_SCHOOLS) {
+        const found = await tools.query<School>('schools', { where: { name: s.name }, limit: 1 })
+        const row = found.success ? found.data.records[0] : undefined
+        if (row) {
+          schools.push({ id: row.recordId, name: s.name, active: !!row.data.active })
+          continue
+        }
+        const created = await must(tools.create('schools', { name: s.name, district: TEST_DISTRICT, city: 'San Diego', address: s.address, active: true, createdByUser: userId }), 'create school')
+        await audit(tools, { actorId: userId, action: 'create_school', targetType: 'school', targetId: created.recordId, toState: s.name, reason: TEST_MARK })
+        schools.push({ id: created.recordId, name: s.name, active: true })
+        schoolsAdded++
+      }
+
+      // 2. Teacher invites, one school each
+      let invited = 0
+      for (const [i, email] of emails.entries()) {
+        const school = schools[i]
+        if (!school.active) refuse(`${school.name} is inactive. Reactivate it under Schools first.`, 'invalid_input')
+        const prior = await tools.query<{ status: string; schoolId: string }>('teacher_invites', { where: { email }, limit: 1 })
+        const p = prior.success ? prior.data.records[0] : undefined
+        if (p && p.data.status === 'accepted') continue // already a teacher; leave them where they are
+        await upsertInvite(tools, userId, { name: testTeacherName(school.name, i + 1), email, schoolId: school.id }, school.name)
+        invited++
+      }
+
+      // 3. Sample sessions for test teachers who have signed in
+      let sessionsAdded = 0
+      const nowMs = Date.now()
+      for (const school of schools) {
+        if (!school.active) continue
+        const inv = await tools.query<{ status: string; acceptedBy?: string; schoolId: string }>('teacher_invites', { where: { schoolId: school.id, status: 'accepted' }, limit: 20 })
+        for (const r of inv.success ? inv.data.records : []) {
+          const teacherId = r.data.acceptedBy
+          if (!teacherId || (await appRoleOf(tools, teacherId)) !== 'teacher') continue
+          const mine = await tools.query('session_requests', { where: { teacherId }, limit: 1 })
+          if (mine.success && mine.data.records.length > 0) continue
+          for (const t of TEST_SESSIONS) {
+            const sessionDate = dateParam({ d: testSessionDate(nowMs, t.daysOut) }, 'd', { required: true })!
+            const created = await must(
+              tools.create('session_requests', { teacherId, grade: t.grade, topic: t.topic, topicOther: '', sessionDate, timeBand: t.timeBand, expectedHeadcount: t.studentCount, status: 'open', schoolId: school.id }),
+              'create test session',
+            )
+            await must(
+              tools.create(
+                'session_details',
+                {
+                  sessionId: created.recordId,
+                  teacherId,
+                  room: t.room,
+                  startTime: t.startTime,
+                  arrivalNote: 'Check in at the front office with photo ID.',
+                  teacherNote: `${TEST_MARK} Sample session for manual testing.`,
+                  classLabel: t.classLabel,
+                  studentCount: t.studentCount,
+                  collaborators: [],
+                },
+                created.recordId,
+              ),
+              'create test details',
+            )
+            await audit(tools, { actorId: userId, action: 'create_session', targetType: 'session', targetId: created.recordId, toState: 'open', reason: TEST_MARK })
+            sessionsAdded++
+          }
+        }
+      }
+
+      await audit(tools, { actorId: userId, action: 'seed_test_data', targetType: 'app', targetId: 'test-data', toState: `schools+${schoolsAdded} invites+${invited} sessions+${sessionsAdded}` })
+      return ok({ schoolsAdded, invited, sessionsAdded, schools: schools.map((s) => s.name) })
+    }),
+
   // ── D9 · Schools in the district — the program admin manages them ─────────
   createSchool: ({ userId, params, tools, env }) =>
     run('createSchool', async () => {
@@ -395,23 +517,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       if (!school) refuse('Choose a school.', 'invalid_input')
       if (!school!.active) refuse(`${school!.name} is inactive.`, 'invalid_input')
 
-      // One invite per email: re-inviting updates the existing row (keeps history in the audit log).
-      const existing = await tools.query<{ status: string }>('teacher_invites', { where: { email }, limit: 1 })
-      const prior = existing.success ? existing.data.records[0] : undefined
-      const data = { email, name, schoolId, invitedBy: userId, status: 'pending', acceptedBy: '' }
-      const inviteId = prior
-        ? (await must(tools.update('teacher_invites', prior.recordId, data), 'update invite')).recordId
-        : (await must(tools.create('teacher_invites', data), 'create invite')).recordId
-      await audit(tools, { actorId: userId, action: 'invite_teacher', targetType: 'invite', targetId: inviteId, toState: `pending@${schoolId}`, reason: name })
-
-      // Already signed in with that email? Give access now instead of waiting.
-      const users = await tools.query<{ email?: string }>('users', { where: { email }, limit: 1 })
-      const match = users.success ? users.data.records[0] : undefined
-      if (match) {
-        await acceptInvite(tools, match.recordId, inviteId, { name, schoolId, invitedBy: userId }, school!.name)
-        return ok({ inviteId, accepted: true })
-      }
-      return ok({ inviteId, accepted: false })
+      return ok(await upsertInvite(tools, userId, { name, email, schoolId }, school!.name))
     }),
 
   revokeTeacherInvite: ({ userId, params, tools, env }) =>

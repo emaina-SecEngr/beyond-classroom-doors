@@ -675,3 +675,74 @@ describe('input handling', () => {
     expect(await call('claimSession', 'u_vol', { sessionId: 'nope' })).toMatchObject({ success: false, code: 'not_found' })
   })
 })
+
+describe('D16 · seedTestData (San Diego Unified test data)', () => {
+  beforeEach(seed)
+
+  it('only the nonprofit admin can load test data', async () => {
+    expect(await call('seedTestData', 'u_staff', {})).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('seedTestData', 'u_teacher', {})).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('seedTestData', 'u_vol', {})).toMatchObject({ success: false, code: 'forbidden' })
+  })
+
+  it('adds the missing schools once, keeping the existing Lincoln High', async () => {
+    const first = await call('seedTestData', OWNER, {})
+    expect(first).toMatchObject({ success: true, data: { schoolsAdded: 4, invited: 0, sessionsAdded: 0 } })
+    expect(rows('schools')).toHaveLength(5)
+    expect(rows('schools').find((s) => s.name === 'Hoover High')).toMatchObject({ district: 'San Diego Unified', address: '4474 El Cajon Blvd., San Diego, CA 92115', active: true })
+    expect(await call('seedTestData', OWNER, {})).toMatchObject({ success: true, data: { schoolsAdded: 0 } })
+    expect(rows('schools')).toHaveLength(5)
+  })
+
+  it('rejects bad, duplicate or too many emails', async () => {
+    expect(await call('seedTestData', OWNER, { teacherEmails: ['not-an-email'] })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('seedTestData', OWNER, { teacherEmails: ['a@x.org', 'A@x.org'] })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('seedTestData', OWNER, { teacherEmails: ['1@x.org', '2@x.org', '3@x.org', '4@x.org', '5@x.org', '6@x.org'] })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+
+  it('invites test teachers one per school; sample sessions appear only after they sign in, once', async () => {
+    db.get('users')!.set('u_t1', { email: 'me+lincoln@example.org', name: 'T1', role: 'member' })
+    const r = await call('seedTestData', OWNER, { teacherEmails: ['me+lincoln@example.org', 'me+hoover@example.org'] })
+    expect(r).toMatchObject({ success: true, data: { invited: 2 } })
+    // me+lincoln had already signed in → teacher now, at Lincoln High, with two sessions.
+    const lincoln = [...db.get('schools')!].find(([, s]) => s.name === 'Lincoln High')![0]
+    expect(row('role_assignments', 'u_t1')).toMatchObject({ role: 'teacher', schoolId: lincoln })
+    const t1Sessions = rows('session_requests').filter((s) => s.teacherId === 'u_t1')
+    expect(t1Sessions).toHaveLength(2)
+    expect(t1Sessions.every((s) => s.status === 'open' && s.schoolId === lincoln)).toBe(true)
+    expect(rows('session_details').filter((d) => d.teacherId === 'u_t1').every((d) => String(d.teacherNote).startsWith('[Test data]'))).toBe(true)
+    // me+hoover hasn't signed in → pending invite, no sessions.
+    expect(rows('teacher_invites').find((i) => i.email === 'me+hoover@example.org')).toMatchObject({ status: 'pending' })
+
+    // They sign in; the next run gives them sessions, and doesn't duplicate t1's.
+    db.get('users')!.set('u_t2', { email: 'me+hoover@example.org', name: 'T2', role: 'member' })
+    expect((await call('acceptTeacherInvite', 'u_t2')).success).toBe(true)
+    expect(await call('seedTestData', OWNER, { teacherEmails: ['me+lincoln@example.org', 'me+hoover@example.org'] })).toMatchObject({
+      success: true,
+      data: { invited: 0, sessionsAdded: 2 },
+    })
+    expect(rows('session_requests').filter((s) => s.teacherId === 'u_t1')).toHaveLength(2)
+    expect(rows('session_requests').filter((s) => s.teacherId === 'u_t2')).toHaveLength(2)
+
+    // A test session can be claimed by an approved volunteer like any other.
+    const sid = [...db.get('session_requests')!].find(([, s]) => s.teacherId === 'u_t2')![0]
+    expect((await call('claimSession', 'u_vol', { sessionId: sid })).success).toBe(true)
+  })
+
+  it('never seeds sessions for real teachers who already have sessions', async () => {
+    const before = rows('session_requests').length
+    await call('seedTestData', OWNER, {})
+    expect(rows('session_requests')).toHaveLength(before)
+  })
+})
+
+describe('D16 · test session dates', () => {
+  it('lands on a weekday', async () => {
+    const { testSessionDate } = await import('./test-data')
+    for (let d = 0; d < 14; d++) {
+      const day = new Date(`${testSessionDate(Date.UTC(2026, 9, 3), d)}T00:00:00Z`).getUTCDay()
+      expect(day).toBeGreaterThanOrEqual(1)
+      expect(day).toBeLessThanOrEqual(5)
+    }
+  })
+})

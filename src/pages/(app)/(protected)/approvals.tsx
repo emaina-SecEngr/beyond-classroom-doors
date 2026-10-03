@@ -20,6 +20,7 @@ import { ErrorNote, Loading, Page } from '../../../components/Page'
 import { ApprovedVolunteers } from '../../../components/admin/ApprovedVolunteers'
 import { AuditLog } from '../../../components/admin/AuditLog'
 import { Schools } from '../../../components/admin/Schools'
+import { TestData } from '../../../components/admin/TestData'
 import { ReviewQueue } from '../../../components/admin/ReviewQueue'
 import { ProgramStaff } from '../../../components/admin/StaffAccess'
 import { markAdminLanded, useAccess, type Access, type StatusRow } from '../../../components/admin/shared'
@@ -101,6 +102,9 @@ function ApprovalsDesk({ access }: { access: Access }) {
           </TabsContent>
           <TabsContent value="schools" className="pt-6">
             <Schools editable />
+            <div className="mt-8">
+              <TestData />
+            </div>
           </TabsContent>
           <TabsContent value="delegate" className="pt-6">
             <ProgramStaff access={access} />
