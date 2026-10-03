@@ -177,6 +177,11 @@ export const actions: Record<string, ActionHandler<Env>> = {
       if (role === 'board_member') requireNonprofitAdmin(userId, env.OWNER_USER_ID)
       const target = await getData(tools, 'users', targetId)
       if (!target) refuse('That user has not signed in yet.', 'not_found')
+      // Separation of duties at assignment time too: whoever can vet (staff, the
+      // nonprofit admin) must never hold the second key, not even as an unusable seat.
+      if (role === 'board_member' && (await isStaff(tools, targetId, env.OWNER_USER_ID))) {
+        refuse('Program staff and the nonprofit admin can’t be board approvers — the board key must be someone else.', 'forbidden')
+      }
       const previous = await appRoleOf(tools, targetId)
       await must(tools.create('role_assignments', { userId: targetId, role, assignedBy: userId }, targetId), 'assign role')
       await audit(tools, { actorId: userId, action: 'assign_role', targetType: 'user', targetId, fromState: previous ?? 'none', toState: role })

@@ -572,7 +572,7 @@ function Roles({ users, nonprofitAdmin }: { users: Person[]; nonprofitAdmin: boo
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="teacher">Teacher</SelectItem>
-                    {nonprofitAdmin && <SelectItem value="board_member">Board approver</SelectItem>}
+                    {nonprofitAdmin && p.platformRole !== 'admin' && <SelectItem value="board_member">Board approver</SelectItem>}
                   </SelectContent>
                 </Select>
                 <Button size="sm" variant="outline" onClick={() => void assign(p)} loading={busyId === p.id} disabled={!choice[p.id] || choice[p.id] === current}>

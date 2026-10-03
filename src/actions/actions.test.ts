@@ -156,14 +156,21 @@ describe('two-key vetting (standing tests 7, 12)', () => {
     await call('vetVolunteer', OWNER, { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', 'u_staff', { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
   })
-  it('the nonprofit admin who vetted cannot also give the board approval', async () => {
-    await call('assignRole', OWNER, { userId: OWNER, role: 'board_member' })
+  it('the nonprofit admin cannot be seated as a board approver', async () => {
+    expect(await call('assignRole', OWNER, { userId: OWNER, role: 'board_member' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(row('role_assignments', OWNER)).toBeUndefined()
+  })
+  it('staff cannot be seated as board approvers', async () => {
+    expect(await call('assignRole', OWNER, { userId: 'u_staff', role: 'board_member' })).toMatchObject({ success: false, code: 'forbidden' })
+  })
+  it('the nonprofit admin who vetted cannot also give the board approval (even with a seat set behind the app’s back)', async () => {
+    db.get('role_assignments')!.set(OWNER, { userId: OWNER, role: 'board_member', assignedBy: OWNER })
     await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
     await call('vetVolunteer', OWNER, { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', OWNER, { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
   })
-  it('staff who are also given the board role still cannot approve', async () => {
-    await call('assignRole', OWNER, { userId: 'u_staff', role: 'board_member' })
+  it('staff who somehow hold the board role still cannot approve', async () => {
+    db.get('role_assignments')!.set('u_staff', { userId: 'u_staff', role: 'board_member', assignedBy: OWNER })
     await call('saveProfile', 'u_new', { displayName: 'New', profession: 'Engineer' })
     await call('vetVolunteer', OWNER, { userId: 'u_new', outcome: 'vetted', identityConfirmed: true, clearanceExpiresAt: futureDate(30) })
     expect(await call('approveVolunteer', 'u_staff', { userId: 'u_new', outcome: 'approved' })).toMatchObject({ success: false, code: 'forbidden' })
