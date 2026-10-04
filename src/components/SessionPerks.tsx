@@ -1,5 +1,5 @@
 /**
- * Thank-you perks for a booked volunteer (D20): a meal (Uber Eats or Grubhub), a ride
+ * Thank-you perks for a booked volunteer (D21): a meal (Uber Eats or Grubhub), a ride
  * to a restaurant, and for volunteers travelling in, a ride to the airport.
  *
  * The program pays through vouchers it creates with the vendor. The app only stores

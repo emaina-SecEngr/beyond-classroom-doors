@@ -143,7 +143,7 @@ async function requireSessionEditor(tools: Parameters<ActionHandler>[0]['tools']
 }
 
 /**
- * Who may set a booking's perks (D20): the program admin, or staff assigned to the
+ * Who may set a booking's perks (D21): the program admin, or staff assigned to the
  * session's school. Never the teacher or the volunteer — these links spend the
  * program's money.
  */
@@ -157,7 +157,7 @@ async function requirePerkEditor(tools: Parameters<ActionHandler>[0]['tools'], u
   refuse('Only the program admin or the school’s program staff can add perks.', 'forbidden')
 }
 
-/** A voucher link from params: empty, or an https link on that vendor's own site (D20). */
+/** A voucher link from params: empty, or an https link on that vendor's own site (D21). */
 function perkLink(params: Record<string, unknown>, key: Perk): string {
   const value = str(params, key, { max: 300 })
   if (!value) return ''
@@ -1015,7 +1015,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       return ok({ sessionId, items })
     }),
 
-  // ── D20 · Thank-you perks for the booked volunteer (voucher links) ────────
+  // ── D21 · Thank-you perks for the booked volunteer (voucher links) ────────
   setSessionPerks: ({ userId, params, tools, env }) =>
     run('setSessionPerks', async () => {
       const sessionId = str(params, 'sessionId', { required: true, max: 100 })

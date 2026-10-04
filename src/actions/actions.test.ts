@@ -672,7 +672,7 @@ describe('confirm and withdraw (standing tests 15, 16)', () => {
   })
 })
 
-describe('D20 · thank-you perks: voucher links (standing test 25)', () => {
+describe('D21 · thank-you perks: voucher links (standing test 25)', () => {
   const links = {
     mealUberEats: 'https://www.ubereats.com/voucher/meal-abc',
     mealGrubhub: 'https://www.grubhub.com/credit/meal-abc',

@@ -46,6 +46,7 @@ import { OpenSessions } from '../../../components/OpenSessions'
 import { MyInvitations } from '../../../components/MyInvitations'
 import { Directions } from '../../../components/Directions'
 import { PrepChecklistView, prepItems } from '../../../components/PrepChecklist'
+import { PerksView, type PerkLinks } from '../../../components/SessionPerks'
 import { sessionStartSeconds } from '../../../lib/time'
 import { EQUIPMENT, SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
@@ -69,6 +70,7 @@ interface SessionRow {
 interface DetailsRow {
   sessionId: string
   prepChecklist?: unknown
+  perks?: PerkLinks | null
   room: string
   startTime: string
   arrivalNote: string
@@ -265,6 +267,8 @@ export default function MySessionsPage() {
                     <div className="mt-4">
                       <PrepChecklistView items={prepItems(b.details?.prepChecklist)} />
                     </div>
+                    {/* D21: thank-you perks — links appear only after they confirm they're coming. */}
+                    <PerksView perks={b.details?.perks} confirmed={!!b.claim.confirmedAt} />
 
                     {b.details?.proposedDate ? (
                       <ProposalBanner

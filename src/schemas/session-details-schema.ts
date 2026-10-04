@@ -43,7 +43,7 @@ export const sessionDetailsSchema: CollectionSchema = {
     { name: 'proposedTimeBand', storage: 'text', interpretation: 'plain' },
     { name: 'proposedBy', storage: 'text', interpretation: 'plain' },
     { name: 'proposedNote', storage: 'text', interpretation: 'plain' },
-    // D20: thank-you perks for the booked volunteer: { mealUberEats?, mealGrubhub?,
+    // D21: thank-you perks for the booked volunteer: { mealUberEats?, mealGrubhub?,
     // rideDining?, rideAirport? } → voucher links. Set by the program admin or the
     // school's staff (`setSessionPerks`); cleared on withdraw or cancel.
     { name: 'perks', storage: 'text', interpretation: { kind: 'json' } },

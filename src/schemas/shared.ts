@@ -64,7 +64,7 @@ export const EQUIPMENT = ['projector', 'screen_hdmi', 'whiteboard_markers', 'sha
 export type Equipment = (typeof EQUIPMENT)[number]
 
 /**
- * Thank-you perks for a booked volunteer (D20). The program pays through vouchers it
+ * Thank-you perks for a booked volunteer (D21). The program pays through vouchers it
  * creates with the vendor; the app only stores and shows the links. Each link must be
  * on that vendor's own site. The dollar limits are set on the voucher itself — the
  * amounts here are only what the screens say.
