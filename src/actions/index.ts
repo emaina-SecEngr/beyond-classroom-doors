@@ -874,7 +874,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
       await notify(tools, {
         recipientId: targetId,
         kind: 'status_changed',
-        title: outcome === 'approved' ? 'You’re approved. Pick a session on the board.' : 'Your application was not approved.',
+        title: outcome === 'approved' ? 'You’re approved. Open sessions and teachers’ invitations are in My sessions.' : 'Your application was not approved.',
         body: outcome === 'rejected' ? reason : '',
       })
       return ok({ userId: targetId, status: outcome })

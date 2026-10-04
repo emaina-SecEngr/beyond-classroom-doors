@@ -169,7 +169,7 @@ export default function MySessionsPage() {
     setPending(null)
     setChangeNote('')
     if (kind === 'confirm') toast.success('Availability confirmed', 'The teacher has been told.')
-    else if (kind === 'withdraw') toast.success('You’ve withdrawn', 'The session is back on the board.')
+    else if (kind === 'withdraw') toast.success('You’ve withdrawn', 'The session is open for other volunteers again.')
     else toast.success('Request sent', 'The program team will follow up. You can also email them.')
   }
 
@@ -350,7 +350,7 @@ export default function MySessionsPage() {
         onClose={() => !busy && setPending(null)}
         onConfirm={run}
         title={pending ? `Withdraw from ${label(pending.booking)}?` : 'Withdraw?'}
-        description="The session goes back on the board and the teacher is told."
+        description="The session opens up for other volunteers and the teacher is told."
         confirmText="Withdraw"
         loading={busy}
       />

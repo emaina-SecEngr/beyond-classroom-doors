@@ -40,7 +40,5 @@ export const nav: NavItem[] = [
   // desk is an app role, so it's linked from the board instead.
   { path: '/staff', label: 'School', roles: ['admin'] },
   { path: '/settings', label: 'Settings', show: 'team' },
-  // The /api-status debug page still exists — add
-  // `{ path: '/api-status', label: 'API Status', devOnly: true }` to surface it.
   // ── Features add nav items below this line ──
 ]
