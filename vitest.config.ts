@@ -29,5 +29,9 @@ export default defineConfig({
     // Unit tests only; tests/*.spec.ts are Playwright suites run separately.
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     environment: 'node',
+    // The render tests import the whole UI kit on first use; on a cold Windows run
+    // that alone can pass the 5 s default. Generous limits, so slowness never fails CI.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 })
