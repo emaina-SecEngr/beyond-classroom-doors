@@ -11,7 +11,7 @@
  * class size. Room, exact time and arrival notes are shared after a claim.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { AuthOverlay, useQuery } from 'deepspace'
 import { Badge, Button } from '@/components/ui'
 import { Loading, Page } from '../../components/Page'
@@ -35,13 +35,54 @@ interface SessionRow {
   schoolId?: string
 }
 
+type Door = 'volunteer' | 'teacher' | 'staff'
+const DOORS: Door[] = ['volunteer', 'teacher', 'staff']
+const DOOR_HINT: Record<Door, string> = {
+  volunteer: 'Volunteers: sign in, then fill in your profile to apply. New here? It takes two minutes.',
+  teacher: 'Teachers: sign in with the school email the program invited.',
+  staff: 'Program staff: sign in with the account the program admin gave access to.',
+}
+
 export default function HomePage() {
   const me = useMe()
+  const [params] = useSearchParams()
+  const asParam = params.get('as')
+  const door = DOORS.includes(asParam as Door) ? (asParam as Door) : null
   if (!me.ready) return <Loading />
-  if (!me.signedIn) return <SignedOutBoard />
+  if (!me.signedIn) return <SignedOutBoard door={door} />
+  // D19: the link someone used is only a hint. Where they go — and what they can do —
+  // comes from their real role. A "wrong door" gets a note, never extra access.
+  const actual: Door = me.isStaff ? 'staff' : me.appRole === 'teacher' ? 'teacher' : 'volunteer'
+  if (door && door !== actual) return <WrongDoor door={door} actual={actual} />
+  if (door === 'teacher') return <Navigate to="/my-volunteers" replace />
   // Volunteers don't use the Program board: their home is My sessions (D15).
-  if (!me.isStaff && !me.appRole) return <Navigate to="/my-sessions" replace />
+  if (actual === 'volunteer') return <Navigate to="/my-sessions" replace />
   return me.isStaff ? <StaffHome me={me} /> : <LiveBoard me={me} />
+}
+
+const ACTUAL_HOME: Record<Door, { to: string; label: string; who: string }> = {
+  volunteer: { to: '/my-sessions', label: 'Go to My sessions', who: 'a volunteer' },
+  teacher: { to: '/my-volunteers', label: 'Go to My volunteers', who: 'a teacher' },
+  staff: { to: '/home', label: 'Go to the Program board', who: 'program staff' },
+}
+
+function WrongDoor({ door, actual }: { door: Door; actual: Door }) {
+  const why: Record<Door, string> = {
+    teacher: 'You don’t have teacher access yet. The program admin invites teachers by their school email; ask them to add you, then sign in with that email.',
+    staff: 'This account isn’t program staff. Only the program admin can give staff access.',
+    volunteer: 'This account has a teacher or staff role, so it isn’t set up for volunteering. Use a separate account to volunteer.',
+  }
+  const home = ACTUAL_HOME[actual]
+  return (
+    <Page title="You’re signed in" intro={`You’re signed in as ${home.who}.`}>
+      <div role="status" className="rounded-md border border-warning/50 bg-warning/10 p-4 text-sm">
+        {why[door]}
+      </div>
+      <Link to={home.to} className="mt-6 inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+        {home.label}
+      </Link>
+    </Page>
+  )
 }
 
 /**
@@ -75,8 +116,9 @@ function sampleBoard(): BoardItem[] {
   ]
 }
 
-function SignedOutBoard() {
-  const [signIn, setSignIn] = useState(false)
+function SignedOutBoard({ door }: { door: Door | null }) {
+  // Arriving from a "Sign in as …" link opens sign-in straight away.
+  const [signIn, setSignIn] = useState(!!door)
   const items = useMemo(sampleBoard, [])
   return (
     <Page
@@ -84,6 +126,11 @@ function SignedOutBoard() {
       intro="Teachers post one-hour career sessions. Volunteers approved by the nonprofit claim them. Sign in to see the live board."
       actions={<Button onClick={() => setSignIn(true)}>Sign in</Button>}
     >
+      {door && (
+        <p role="note" className="mb-6 rounded-md border border-border bg-card p-3 text-sm">
+          {DOOR_HINT[door]}
+        </p>
+      )}
       <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Example — not real sessions</p>
       <div aria-label="Example sessions" className="opacity-80">
         <BoardList items={items} renderAction={() => <Button size="sm" variant="outline" disabled>Claim</Button>} />

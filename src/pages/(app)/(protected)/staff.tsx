@@ -55,7 +55,7 @@ import {
   VOLUNTEER_STATUS_LABELS,
 } from '../../../lib/labels'
 import { useMe, type ProfileRow } from '../../../lib/me'
-import { useSchools } from '../../../lib/schools'
+import { useSchools, fullAddress } from '../../../lib/schools'
 import { type AppRole, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
 interface ChangeRow {
@@ -124,7 +124,7 @@ function StaffDesk() {
   return (
     <Page
       title={school ? school.name : 'School view'}
-      intro={school ? [school.district, school.address, school.city].filter(Boolean).join(' · ') : 'Every school in the program. Pick one to focus on it.'}
+      intro={school ? [school.district, fullAddress(school)].filter(Boolean).join(' · ') : 'Every school in the program. Pick one to focus on it.'}
       actions={
         access.nonprofitAdmin ? (
           <Select value={schoolId ?? ALL} onValueChange={(v) => setPicked(v || ALL)}>

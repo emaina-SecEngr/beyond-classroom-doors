@@ -14,7 +14,7 @@ import { ErrorNote, Field, Loading } from '../Page'
 import { callAction } from '../../lib/actions'
 import { CITIES, DISTRICTS } from '../../lib/options'
 import { PickOrOther } from '../Pickers'
-import { useSchools, type SchoolRecord } from '../../lib/schools'
+import { useSchools, type SchoolRecord, fullAddress } from '../../lib/schools'
 
 const EMPTY = { name: '', district: 'San Diego Unified', city: 'San Diego', address: '', active: true }
 
@@ -121,7 +121,7 @@ export function Schools({ editable }: { editable: boolean }) {
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{s.name}</p>
-                    <p className="text-xs text-muted-foreground">{[s.district, s.address, s.city].filter(Boolean).join(' · ') || '—'}</p>
+                    <p className="text-xs text-muted-foreground">{[s.district, fullAddress(s)].filter(Boolean).join(' · ') || '—'}</p>
                   </div>
                   {!s.active && <Badge variant="outline">Inactive</Badge>}
                   {editable && (

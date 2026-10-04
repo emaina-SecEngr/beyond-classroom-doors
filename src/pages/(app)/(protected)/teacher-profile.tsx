@@ -12,7 +12,7 @@ import { CheckList, PickOrOther } from '../../../components/Pickers'
 import { callAction } from '../../../lib/actions'
 import { useMe } from '../../../lib/me'
 import { SUBJECTS } from '../../../lib/options'
-import { useSchools } from '../../../lib/schools'
+import { useSchools, fullAddress } from '../../../lib/schools'
 import { GRADES } from '../../../schemas/shared'
 
 interface TeacherProfileRow {
@@ -62,7 +62,7 @@ export default function TeacherProfilePage() {
         <Panel>
           <dl>
             <Fact label="School">{school ? school.name : 'Not set yet'}</Fact>
-            <Fact label="Address">{school ? [school.address, school.city].filter(Boolean).join(', ') || '—' : '—'}</Fact>
+            <Fact label="Address">{school ? fullAddress(school) || '—' : '—'}</Fact>
             <Fact label="District">{school?.district || '—'}</Fact>
           </dl>
           <p className="mt-3 text-xs text-muted-foreground">The program admin assigns your school. Email them if it’s wrong.</p>

@@ -132,6 +132,20 @@ The schools and addresses are real public listings from the San Diego Unified di
    - ✅ S now sees **Approvals** (Waiting only).
    - ✅ After **End**, it disappears.
 
+## 7b · Sign-in links (signed out, then each account)
+1. Open the landing page signed out.
+   - ✅ Under the buttons: *Sign in as a volunteer, teacher or program staff*.
+   - ✅ The footer has three sign-in links.
+2. Click **teacher**.
+   - ✅ Sign-in opens right away, with the note *Teachers: sign in with the school email…*.
+3. Sign in as **T1** → ✅ lands on **My volunteers**.
+4. Sign out, use **teacher**, sign in as **V1**.
+   - ✅ *You're signed in as a volunteer. You don't have teacher access yet…*, with a **Go to My sessions** button.
+   - ✅ Nav shows only the volunteer links.
+5. Use **program staff** as **V1**.
+   - ✅ *This account isn't program staff…*; no Approvals in the nav.
+6. Use **program staff** as **A** → ✅ lands on **Approvals**.
+
 ## 8 · Negative checks (should all fail politely)
 - **V2** opens `/approvals` or `/staff` directly → ✅ refused or empty, no data.
 - **T1** opens `/approvals` → ✅ refused.
@@ -152,4 +166,5 @@ The schools and addresses are real public listings from the San Diego Unified di
 | 5b |  |  |
 | 6 |  |  |
 | 7 |  |  |
+| 7b |  |  |
 | 8 |  |  |

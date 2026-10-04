@@ -77,6 +77,21 @@ export function PublicFooter() {
               </Link>
             </li>
             <li>
+              <Link to="/home?as=volunteer" className="hover:text-foreground">
+                Volunteer sign in
+              </Link>
+            </li>
+            <li>
+              <Link to="/home?as=teacher" className="hover:text-foreground">
+                Teacher sign in
+              </Link>
+            </li>
+            <li>
+              <Link to="/home?as=staff" className="hover:text-foreground">
+                Program staff sign in
+              </Link>
+            </li>
+            <li>
               <a href={`mailto:${PROGRAM_EMAIL}`} className="hover:text-foreground">
                 Contact the program team
               </a>
@@ -85,5 +100,31 @@ export function PublicFooter() {
         </div>
       </div>
     </footer>
+  )
+}
+
+/**
+ * "Sign in as" links (D19). All three open the SAME sign-in; the role comes from the
+ * server afterwards (approval, teacher invite, staff role) — never from the link.
+ */
+export const SIGN_IN_AS = [
+  { as: 'volunteer', label: 'volunteer' },
+  { as: 'teacher', label: 'teacher' },
+  { as: 'staff', label: 'program staff' },
+] as const
+
+export function SignInLinks({ className }: { className?: string }) {
+  return (
+    <p className={className ?? 'text-sm text-muted-foreground'}>
+      Sign in as a{' '}
+      {SIGN_IN_AS.map((l, i) => (
+        <span key={l.as}>
+          {i > 0 && (i === SIGN_IN_AS.length - 1 ? ' or ' : ', ')}
+          <Link to={`/home?as=${l.as}`} className="font-medium text-foreground underline underline-offset-4 hover:text-primary">
+            {l.label}
+          </Link>
+        </span>
+      ))}
+    </p>
   )
 }

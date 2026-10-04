@@ -36,7 +36,7 @@
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { PublicFooter, PublicHeader } from '../components/PublicChrome'
+import { PublicFooter, PublicHeader, SignInLinks } from '../components/PublicChrome'
 import { Seo } from '../components/Seo'
 import { cn } from '../lib/utils'
 import { seo } from '../seo'
@@ -178,6 +178,7 @@ export default function Landing() {
                   See open sessions
                 </Link>
               </div>
+              <SignInLinks className="mt-4 text-sm text-muted-foreground" />
             </div>
             <SessionBoard />
           </section>

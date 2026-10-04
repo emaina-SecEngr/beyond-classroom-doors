@@ -13,7 +13,7 @@ import { Badge, EmptyState } from '@/components/ui'
 import { ErrorNote, Loading, Page } from '../../../components/Page'
 import { formatSessionDate, sessionTimeText, todaySeconds, topicText } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
-import { useSchools } from '../../../lib/schools'
+import { useSchools, fullAddress } from '../../../lib/schools'
 import type { TimeBand } from '../../../schemas/shared'
 
 interface ClaimRow {
@@ -87,7 +87,7 @@ export default function MyTeachersPage() {
                   <div className="min-w-0">
                     <h2 className="font-display text-xl font-semibold">{t.name}</h2>
                     <p className="text-sm text-muted-foreground">
-                      {school ? [school.name, school.address, school.city].filter(Boolean).join(', ') : 'School not set'}
+                      {school ? [school.name, fullAddress(school)].filter(Boolean).join(', ') : 'School not set'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

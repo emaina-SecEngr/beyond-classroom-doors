@@ -29,12 +29,15 @@ export function BookedSessionTools({
   status,
   details,
   viewerId,
+  hideName = false,
 }: {
   sessionId: string
   label: string
   status: string
   details: BookedDetails | undefined
   viewerId: string | null
+  /** The card already shows the volunteer's name (My volunteers). */
+  hideName?: boolean
 }) {
   const toast = useToast()
   const [confirming, setConfirming] = useState(false)
@@ -59,7 +62,7 @@ export function BookedSessionTools({
   return (
     <div className="basis-full rounded-md border border-border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="font-medium">{d.volunteerName || 'Booked volunteer'}</span>
+        {!hideName && <span className="font-medium">{d.volunteerName || 'Booked volunteer'}</span>}
         {d.volunteerEmail && (
           <a className="text-primary underline-offset-4 hover:underline" href={`mailto:${d.volunteerEmail}?subject=${encodeURIComponent(`Career session: ${label}`)}`}>
             Email

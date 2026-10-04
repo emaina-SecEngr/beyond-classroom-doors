@@ -40,7 +40,7 @@ import {
   topicText,
 } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
-import { useSchools } from '../../../lib/schools'
+import { useSchools, fullAddress } from '../../../lib/schools'
 import { ProposalBanner, ProposeDateButton } from '../../../components/DateProposal'
 import { OpenSessions } from '../../../components/OpenSessions'
 import { MyInvitations } from '../../../components/MyInvitations'
@@ -221,7 +221,7 @@ export default function MySessionsPage() {
                     <dl className="mt-4 space-y-1.5">
                       {(() => {
                         const sc = schoolById.get(b.session!.schoolId ?? '')
-                        return sc ? <Fact label="School">{[sc.name, sc.address, sc.city].filter(Boolean).join(', ')}</Fact> : null
+                        return sc ? <Fact label="School">{[sc.name, fullAddress(sc)].filter(Boolean).join(', ')}</Fact> : null
                       })()}
                       {b.details?.teacherName || b.details?.teacherEmail ? (
                         <Fact label="Teacher">

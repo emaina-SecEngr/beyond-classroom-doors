@@ -103,7 +103,7 @@ export default function MyVolunteersPage() {
                       </div>
                     </div>
                     <div className="mt-4">
-                      <BookedSessionTools sessionId={r.recordId} label={label(r.data)} status={r.data.status} details={d} viewerId={me.userId} />
+                      <BookedSessionTools sessionId={r.recordId} label={label(r.data)} status={r.data.status} details={d} viewerId={me.userId} hideName />
                     </div>
                     <section className="mt-4 rounded-md border border-border p-4" aria-label={`Prep checklist for ${d?.volunteerName || 'the volunteer'}`}>
                       <h3 className="mb-2 text-sm font-semibold">Prep checklist for this visit</h3>

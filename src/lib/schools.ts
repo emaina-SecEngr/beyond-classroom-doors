@@ -20,3 +20,11 @@ export function useSchools(): { schools: SchoolRecord[]; byId: Map<string, Schoo
 }
 
 export const schoolLine = (s: SchoolRecord | undefined | null): string => (s ? [s.name, s.city].filter(Boolean).join(', ') : '')
+
+/** Street address plus city — the city only when the address doesn't already include it. */
+export const fullAddress = (s: Pick<School, 'address' | 'city'> | undefined | null): string => {
+  if (!s) return ''
+  const addr = (s.address ?? '').trim()
+  const city = (s.city ?? '').trim()
+  return city && !addr.toLowerCase().includes(city.toLowerCase()) ? [addr, city].filter(Boolean).join(', ') : addr
+}
