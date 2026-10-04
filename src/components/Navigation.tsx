@@ -18,6 +18,7 @@ import { nav } from '../nav'
 import { useAccess } from './admin/shared'
 import { useMe } from '../lib/me'
 import { callAction } from '../lib/actions'
+import { signInCopy } from '../lib/signin'
 
 // Users we've already checked for a teacher invite in this page load (D10).
 const inviteChecked = new Set<string>()
@@ -193,7 +194,7 @@ export default function Navigation() {
         )}
       </nav>
 
-      {showAuthModal && <AuthOverlay onClose={() => setShowAuthModal(false)} />}
+      {showAuthModal && <AuthOverlay onClose={() => setShowAuthModal(false)} {...signInCopy()} />}
     </>
   )
 }

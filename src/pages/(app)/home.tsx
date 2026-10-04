@@ -21,6 +21,7 @@ import { formatSessionDate, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } f
 import { useMe, type Me } from '../../lib/me'
 import { ADMIN_LANDED_KEY, markAdminLanded, useAccess } from '../../components/admin/shared'
 import { useSchools } from '../../lib/schools'
+import { signInCopy } from '../../lib/signin'
 import type { TimeBand } from '../../schemas/shared'
 
 interface SessionRow {
@@ -154,7 +155,7 @@ function SignedOutBoard({ door }: { door: Door | null }) {
       <div aria-label="Example sessions" className="opacity-80">
         <BoardList items={items} renderAction={() => <Button size="sm" variant="outline" disabled>Claim</Button>} />
       </div>
-      {signIn && <AuthOverlay onClose={() => setSignIn(false)} />}
+      {signIn && <AuthOverlay onClose={() => setSignIn(false)} {...signInCopy(door)} />}
     </Page>
   )
 }
