@@ -9,6 +9,7 @@ import { useQuery } from 'deepspace'
 import { Badge, Button, ConfirmModal, EmptyState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useToast } from '@/components/ui'
 import { ErrorNote, Loading } from './Page'
 import { callAction } from '../lib/actions'
+import { Directions } from './Directions'
 import { formatSessionDate, TIME_BAND_SHORT, todaySeconds, topicText } from '../lib/labels'
 import { useSchools } from '../lib/schools'
 import type { TimeBand } from '../schemas/shared'
@@ -36,6 +37,8 @@ export interface BoardItem {
   timeBand: TimeBand
   expectedHeadcount: number | null
   schoolName?: string
+  /** D20: for the Directions link (signed-in board only). */
+  school?: { name: string; address: string; city: string }
 }
 
 export function OpenSessions({ canClaim, emptyDescription, preferredSchools = [] }: { canClaim: boolean; emptyDescription: string; preferredSchools?: string[] }) {
@@ -56,7 +59,7 @@ export function OpenSessions({ canClaim, emptyDescription, preferredSchools = []
   const schoolsOnBoard = schools.filter((sc) => upcoming.some((r) => r.data.schoolId === sc.id))
   const items: BoardItem[] = upcoming
     .filter((r) => schoolFilter === '__all__' || r.data.schoolId === schoolFilter)
-    .map((r) => ({ id: r.recordId, ...r.data, schoolName: schoolById.get(r.data.schoolId ?? '')?.name, preferred: preferredSchools.includes(r.data.schoolId ?? '') }))
+    .map((r) => ({ id: r.recordId, ...r.data, schoolName: schoolById.get(r.data.schoolId ?? '')?.name, school: schoolById.get(r.data.schoolId ?? ''), preferred: preferredSchools.includes(r.data.schoolId ?? '') }))
     // D17: sessions at the volunteer's chosen schools first, each group by date.
     .sort((a, b) => Number(!!b.preferred) - Number(!!a.preferred) || a.sessionDate - b.sessionDate)
 
@@ -141,6 +144,7 @@ export function BoardList({ items, renderAction }: { items: BoardItem[]; renderA
               {item.schoolName ? `${item.schoolName} · ` : ''}Grade {item.grade}
               {item.expectedHeadcount ? ` · about ${item.expectedHeadcount} students` : ''}
             </p>
+            {item.school ? <Directions school={item.school} label="Directions" className="text-xs font-medium text-primary underline-offset-4 hover:underline" /> : null}
           </div>
           {item.preferred ? <Badge variant="success">Your school</Badge> : null}
           <Badge variant="info">Open</Badge>

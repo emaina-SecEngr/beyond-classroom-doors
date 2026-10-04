@@ -10,7 +10,8 @@ import { Button, useToast } from '@/components/ui'
 import { Section } from './Page'
 import { callAction } from '../lib/actions'
 import { formatSessionDate, TIME_BAND_SHORT, topicText } from '../lib/labels'
-import { useSchools } from '../lib/schools'
+import { fullAddress, useSchools } from '../lib/schools'
+import { Directions } from './Directions'
 import type { TimeBand } from '../schemas/shared'
 
 interface InviteRow {
@@ -69,7 +70,8 @@ export function MyInvitations({ volunteerId, canClaim }: { volunteerId: string; 
               </p>
               <p className="text-sm text-muted-foreground">
                 {formatSessionDate(s!.sessionDate)}, {TIME_BAND_SHORT[s!.timeBand]}
-                {school ? ` · ${[school.name, school.address].filter(Boolean).join(', ')}` : ''}
+                {school ? ` · ${[school.name, fullAddress(school)].filter(Boolean).join(', ')} · ` : ''}
+                {school ? <Directions school={school} /> : null}
               </p>
               {inv.note ? <p className="mt-2 text-sm">“{inv.note}”</p> : null}
               <div className="mt-3 flex flex-wrap items-center gap-2">

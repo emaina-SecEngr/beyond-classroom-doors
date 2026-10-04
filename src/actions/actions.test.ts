@@ -672,6 +672,95 @@ describe('confirm and withdraw (standing tests 15, 16)', () => {
   })
 })
 
+describe('D20 · thank-you perks: voucher links (standing test 25)', () => {
+  const links = {
+    mealUberEats: 'https://www.ubereats.com/voucher/meal-abc',
+    mealGrubhub: 'https://www.grubhub.com/credit/meal-abc',
+    rideDining: 'https://r.uber.com/dine-abc',
+    rideAirport: 'https://r.uber.com/airport-abc',
+  }
+  const perks = () => row('session_details', S)?.perks
+  beforeEach(async () => {
+    await call('claimSession', 'u_vol', { sessionId: S })
+  })
+
+  it('only the program admin or staff at that school can set them — not the teacher, the volunteer or other staff', async () => {
+    expect(await call('setSessionPerks', 'u_teacher', { sessionId: S, ...links })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('setSessionPerks', 'u_vol', { sessionId: S, ...links })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('setSessionPerks', 'u_staff', { sessionId: S, ...links })).toMatchObject({ success: false, code: 'forbidden' }) // no school yet
+    const other = await call('createSchool', OWNER, { name: 'Hoover High' })
+    await call('assignStaffSchool', OWNER, { userId: 'u_staff', schoolId: (other as { data: { schoolId: string } }).data.schoolId })
+    expect(await call('setSessionPerks', 'u_staff', { sessionId: S, ...links })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(perks()).toEqual({})
+    await call('assignStaffSchool', OWNER, { userId: 'u_staff', schoolId: SCHOOL })
+    expect((await call('setSessionPerks', 'u_staff', { sessionId: S, mealUberEats: links.mealUberEats })).success).toBe(true)
+    expect((await call('setSessionPerks', OWNER, { sessionId: S, ...links })).success).toBe(true)
+    expect(perks()).toEqual(links)
+  })
+
+  it('needs a booked volunteer', async () => {
+    const open = await call('createSessionRequest', 'u_teacher', { grade: '10', topic: 'engineering', sessionDate: futureDate(12), timeBand: 'midday' })
+    const id = (open as { data: { sessionId: string } }).data.sessionId
+    expect(await call('setSessionPerks', OWNER, { sessionId: id, ...links })).toMatchObject({ success: false, code: 'stale_state' })
+    expect(await call('setSessionPerks', OWNER, { sessionId: 'nope', ...links })).toMatchObject({ success: false, code: 'not_found' })
+  })
+
+  it('accepts only https links on the vendor’s own site', async () => {
+    for (const bad of [
+      'http://r.uber.com/abc',
+      'javascript:alert(1)',
+      'not a link',
+      'https://evil.example/uber.com',
+      'https://uber.com.evil.example/abc',
+      'https://notuber.com/abc',
+      'https://uber.com@evil.example/abc',
+      'https://www.grubhub.com/credit/abc', // right vendor, wrong field
+    ]) {
+      expect(await call('setSessionPerks', OWNER, { sessionId: S, rideAirport: bad }), bad).toMatchObject({ success: false, code: 'invalid_input' })
+    }
+    expect(await call('setSessionPerks', OWNER, { sessionId: S, mealGrubhub: links.rideDining })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('setSessionPerks', OWNER, { sessionId: S, rideDining: `https://r.uber.com/${'a'.repeat(300)}` })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(perks()).toEqual({})
+  })
+
+  it('the volunteer is told without the link; the audit log names the perks, never the links', async () => {
+    const before = rows('notifications').length
+    expect(await call('setSessionPerks', OWNER, { sessionId: S, ...links })).toMatchObject({ success: true, data: { changed: true } })
+    const sent = rows('notifications').slice(before)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ recipientId: 'u_vol' })
+    expect(JSON.stringify(rows('notifications'))).not.toMatch(/uber\.com|ubereats\.com|grubhub\.com/)
+    const entry = rows('audit_log').find((a) => a.action === 'set_session_perks')
+    expect(entry).toMatchObject({ actorId: OWNER, targetId: S, fromState: 'none', toState: 'mealUberEats,mealGrubhub,rideDining,rideAirport' })
+    expect(JSON.stringify(rows('audit_log'))).not.toMatch(/https:/)
+    // Saving the same links again changes nothing: no second message, no second entry.
+    expect(await call('setSessionPerks', OWNER, { sessionId: S, ...links })).toMatchObject({ success: true, data: { changed: false } })
+    expect(rows('notifications')).toHaveLength(before + 1)
+    expect(rows('audit_log').filter((a) => a.action === 'set_session_perks')).toHaveLength(1)
+  })
+
+  it('a perk can be taken back by clearing its field', async () => {
+    await call('setSessionPerks', OWNER, { sessionId: S, ...links })
+    expect((await call('setSessionPerks', OWNER, { sessionId: S, mealUberEats: links.mealUberEats })).success).toBe(true)
+    expect(perks()).toEqual({ mealUberEats: links.mealUberEats })
+  })
+
+  it('withdrawing clears them, so the next volunteer never inherits a link', async () => {
+    await call('setSessionPerks', OWNER, { sessionId: S, ...links })
+    expect((await call('withdrawClaim', 'u_vol', { sessionId: S })).success).toBe(true)
+    expect(perks()).toEqual({})
+    await call('claimSession', 'u_vol2', { sessionId: S })
+    expect(perks()).toEqual({})
+  })
+
+  it('cancelling the session clears them', async () => {
+    await call('setSessionPerks', OWNER, { sessionId: S, ...links })
+    expect((await call('cancelSession', OWNER, { sessionId: S, reason: 'Assembly' })).success).toBe(true)
+    expect(perks()).toEqual({})
+    expect(await call('setSessionPerks', OWNER, { sessionId: S, ...links })).toMatchObject({ success: false, code: 'stale_state' })
+  })
+})
+
 describe('input handling', () => {
   it('rejects non-text and oversized input', async () => {
     expect(await call('saveProfile', 'u_x', { displayName: { $ne: 1 }, profession: 'x' })).toMatchObject({ code: 'invalid_input' })

@@ -22,6 +22,9 @@ import {
   VETTING_HELP_MAX_DAYS,
   MAX_PENDING_INVITES_PER_SESSION,
   MAX_PREP_ITEMS,
+  PERKS,
+  PERK_HOSTS,
+  type Perk,
   TIME_BANDS,
   TOPICS,
   CHANGE_REQUEST_KINDS,
@@ -98,6 +101,7 @@ interface SessionDetails extends Record<string, unknown> {
   equipmentOther?: string
   equipmentReady?: string[]
   volunteerName?: string
+  perks?: Partial<Record<Perk, string>> | null
   sessionId: string
   teacherId: string
   room: string
@@ -136,6 +140,38 @@ async function requireSessionEditor(tools: Parameters<ActionHandler>[0]['tools']
     refuse('You can only change sessions at the school you’re assigned to.', 'forbidden')
   }
   refuse('Only the session’s teacher or program staff can change it.', 'forbidden')
+}
+
+/**
+ * Who may set a booking's perks (D20): the program admin, or staff assigned to the
+ * session's school. Never the teacher or the volunteer — these links spend the
+ * program's money.
+ */
+async function requirePerkEditor(tools: Parameters<ActionHandler>[0]['tools'], userId: string, ownerUserId: string | undefined, session: SessionRequest) {
+  if (isNonprofitAdmin(userId, ownerUserId)) return
+  if (await isStaff(tools, userId, ownerUserId)) {
+    const mine = await getData<{ schoolId?: string }>(tools, 'staff_schools', userId)
+    if (mine?.schoolId && mine.schoolId === session.schoolId) return
+    refuse('You can only add perks for sessions at the school you’re assigned to.', 'forbidden')
+  }
+  refuse('Only the program admin or the school’s program staff can add perks.', 'forbidden')
+}
+
+/** A voucher link from params: empty, or an https link on that vendor's own site (D20). */
+function perkLink(params: Record<string, unknown>, key: Perk): string {
+  const value = str(params, key, { max: 300 })
+  if (!value) return ''
+  const hosts = PERK_HOSTS[key]
+  const bad = (): never => refuse(`That link must be an https link on ${hosts.join(' or ')}.`, 'invalid_input')
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return bad()
+  }
+  const host = url.hostname.toLowerCase()
+  if (url.protocol !== 'https:' || url.username || url.password || !hosts.some((d) => host === d || host.endsWith(`.${d}`))) bad()
+  return url.toString()
 }
 
 /** Equipment list from params: known items only, no duplicates. */
@@ -214,6 +250,7 @@ async function bookSession(tools: Parameters<ActionHandler>[0]['tools'], volunte
         proposedTimeBand: '',
         proposedBy: '',
         proposedNote: '',
+        perks: {},
       }),
       'share details',
     )
@@ -978,6 +1015,45 @@ export const actions: Record<string, ActionHandler<Env>> = {
       return ok({ sessionId, items })
     }),
 
+  // ── D20 · Thank-you perks for the booked volunteer (voucher links) ────────
+  setSessionPerks: ({ userId, params, tools, env }) =>
+    run('setSessionPerks', async () => {
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session) refuse('Session not found.', 'not_found')
+      await requirePerkEditor(tools, userId, env.OWNER_USER_ID, session!)
+      // Perks belong to a booking, so the next volunteer can never inherit a link.
+      if (session!.status !== 'claimed' && session!.status !== 'confirmed') refuse('Add perks once a volunteer is booked.', 'stale_state')
+      const claim = await activeClaimFor(tools, sessionId)
+      if (!claim) refuse('No volunteer is booked.', 'stale_state')
+      const before = await getData<SessionDetails>(tools, 'session_details', sessionId)
+      if (!before) refuse('Session details not found.', 'not_found')
+
+      const perks: Partial<Record<Perk, string>> = {}
+      for (const p of PERKS) {
+        const link = perkLink(params, p)
+        if (link) perks[p] = link
+      }
+      const had = before!.perks ?? {}
+      const changed = PERKS.some((p) => (had[p] ?? '') !== (perks[p] ?? ''))
+      if (changed) {
+        await must(tools.update('session_details', sessionId, { perks }), 'save perks')
+        // A voucher link is as good as money: the audit log and the notification name
+        // WHICH perks were set, never the links themselves.
+        const names = (o: Partial<Record<Perk, string>>) => PERKS.filter((p) => o[p]).join(',') || 'none'
+        await audit(tools, { actorId: userId, action: 'set_session_perks', targetType: 'session', targetId: sessionId, fromState: names(had), toState: names(perks) })
+        if (Object.keys(perks).length) {
+          await notify(tools, {
+            recipientId: claim!.data.volunteerId,
+            kind: 'status_changed',
+            title: `A thank-you from the program: Grade ${session!.grade} · ${topicLabel(session!)}`,
+            body: 'Your meal and ride options are in My sessions.',
+          })
+        }
+      }
+      return ok({ sessionId, perks: PERKS.filter((p) => perks[p]), changed })
+    }),
+
   // ── D11 · The program admin assigns each staff member to a school ─────────
   assignStaffSchool: ({ userId, params, tools, env }) =>
     run('assignStaffSchool', async () => {
@@ -1143,7 +1219,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
         'withdraw',
       )
       await must(tools.update('session_requests', sessionId, { status: 'open' }), 'reopen')
-      if (details) await must(tools.update('session_details', sessionId, { collaborators: [], volunteerName: '', volunteerEmail: '', volunteerPhone: '', accessNeeds: '', equipmentRequested: [], equipmentReady: [], equipmentOther: '', readyAt: null, proposedDate: null, proposedTimeBand: '', proposedBy: '', proposedNote: '' }), 'unshare details')
+      if (details) await must(tools.update('session_details', sessionId, { collaborators: [], volunteerName: '', volunteerEmail: '', volunteerPhone: '', accessNeeds: '', equipmentRequested: [], equipmentReady: [], equipmentOther: '', readyAt: null, proposedDate: null, proposedTimeBand: '', proposedBy: '', proposedNote: '', perks: {} }), 'unshare details')
       await audit(tools, { actorId: userId, action: 'withdraw', targetType: 'session', targetId: sessionId, fromState: session!.status, toState: 'open' })
       await notify(tools, {
         recipientId: session!.teacherId,
@@ -1205,7 +1281,7 @@ export const actions: Record<string, ActionHandler<Env>> = {
         )
         // Stop sharing the private details (room, contacts) with the released volunteer.
         if (await getData(tools, 'session_details', sessionId)) {
-          await must(tools.update('session_details', sessionId, { collaborators: [], volunteerEmail: '', volunteerPhone: '', accessNeeds: '', proposedDate: null, proposedBy: '' }), 'unshare details')
+          await must(tools.update('session_details', sessionId, { collaborators: [], volunteerEmail: '', volunteerPhone: '', accessNeeds: '', proposedDate: null, proposedBy: '', perks: {} }), 'unshare details')
         }
         await notify(tools, {
           recipientId: claim.data.volunteerId,

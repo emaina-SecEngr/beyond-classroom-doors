@@ -80,7 +80,10 @@ The schools and addresses are real public listings from the San Diego Unified di
    - ✅ It moves to their booked list with school, room, class (*Period 2 · Health Science*) and 28 students.
    - ✅ Teacher shows **Ms. Rivera · Email · Call 619-555-0100**.
 3. **V1**: request equipment (projector, markers…) and confirm availability.
-4. **V1 → My teachers**.
+4. On the booked session, click **Directions & distance**.
+   - ✅ Google Maps opens in a new tab with Lincoln High as the destination, showing distance and drive time from your location.
+   - ✅ **Directions** also appears on invitations, open sessions and My teachers.
+5. **V1 → My teachers**.
    - ✅ Card for Ms. Rivera with Lincoln High and its address, plus **Call** and **Email** buttons and the session.
    - ✅ **Open** goes back to the session.
 5. **T1 → Teacher desk**.

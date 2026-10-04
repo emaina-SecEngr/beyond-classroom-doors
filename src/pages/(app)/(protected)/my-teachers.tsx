@@ -14,6 +14,7 @@ import { ErrorNote, Loading, Page } from '../../../components/Page'
 import { formatSessionDate, sessionTimeText, todaySeconds, topicText } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
 import { useSchools, fullAddress } from '../../../lib/schools'
+import { Directions } from '../../../components/Directions'
 import type { TimeBand } from '../../../schemas/shared'
 
 interface ClaimRow {
@@ -88,6 +89,12 @@ export default function MyTeachersPage() {
                     <h2 className="font-display text-xl font-semibold">{t.name}</h2>
                     <p className="text-sm text-muted-foreground">
                       {school ? [school.name, fullAddress(school)].filter(Boolean).join(', ') : 'School not set'}
+                      {school ? (
+                        <>
+                          {' · '}
+                          <Directions school={school} />
+                        </>
+                      ) : null}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

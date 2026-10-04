@@ -28,3 +28,14 @@ export const fullAddress = (s: Pick<School, 'address' | 'city'> | undefined | nu
   const city = (s.city ?? '').trim()
   return city && !addr.toLowerCase().includes(city.toLowerCase()) ? [addr, city].filter(Boolean).join(', ') : addr
 }
+
+/**
+ * Google Maps directions to a school (D20). A plain link: Maps works out distance and
+ * travel time from wherever the volunteer is. No API key, and their location never
+ * reaches this app. Only the school's public name and address go into the URL.
+ */
+export const directionsUrl = (s: Pick<School, 'name' | 'address' | 'city'> | undefined | null): string => {
+  if (!s) return ''
+  const dest = [s.name, fullAddress(s)].filter(Boolean).join(', ')
+  return dest ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}` : ''
+}

@@ -256,6 +256,10 @@ Extend the scaffold's three specs; don't add parallel suites.
 24. A volunteer's access needs are practical help, never a diagnosis; they reach only the
     booked session's teacher, school staff and the program admin; notifications say only
     that needs exist; only the volunteer edits them; cleared on withdraw or cancel.
+25. Perk voucher links (meal, rides) are set only by the program admin or the session's
+    school staff, only for a booked session, and only as https links on the vendor's own
+    site; they never appear in notifications or the audit log; cleared on withdraw or
+    cancel. The app stores links only — it never charges, pays or holds a card (D7).
 
 ---
 

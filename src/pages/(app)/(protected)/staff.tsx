@@ -39,6 +39,7 @@ import { AuditLog } from '../../../components/admin/AuditLog'
 import { useAccess, type Person, type StatusRow } from '../../../components/admin/shared'
 import { SessionDetailsModal, toEditable, type EditableDetails } from '../../../components/SessionDetailsModal'
 import { BookedSessionTools } from '../../../components/BookedSessionTools'
+import { PerksButton, type PerkLinks } from '../../../components/SessionPerks'
 import { AssignVolunteerButton } from '../../../components/admin/AssignVolunteer'
 import { callAction } from '../../../lib/actions'
 import {
@@ -349,6 +350,7 @@ interface DetailsRow {
   proposedTimeBand?: string
   proposedBy?: string
   proposedNote?: string
+  perks?: PerkLinks | null
 }
 interface ClaimRow {
   sessionId: string
@@ -435,6 +437,9 @@ function Sessions({ nameOf, scope, viewerId, isAdmin }: { nameOf: (id: string) =
                   >
                     Details
                   </Button>
+                  {claim && (r.data.status === 'claimed' || r.data.status === 'confirmed') && (
+                    <PerksButton sessionId={r.recordId} label={`${label}, ${formatSessionDate(r.data.sessionDate)}`} volunteerName={d?.volunteerName} perks={d?.perks} />
+                  )}
                   {isAdmin && r.data.status === 'open' && <AssignVolunteerButton sessionId={r.recordId} schoolId={r.data.schoolId} label={`${label}, ${formatSessionDate(r.data.sessionDate)}`} />}
                 </div>
               </div>

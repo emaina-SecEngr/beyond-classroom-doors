@@ -44,6 +44,7 @@ import { useSchools, fullAddress } from '../../../lib/schools'
 import { ProposalBanner, ProposeDateButton } from '../../../components/DateProposal'
 import { OpenSessions } from '../../../components/OpenSessions'
 import { MyInvitations } from '../../../components/MyInvitations'
+import { Directions } from '../../../components/Directions'
 import { PrepChecklistView, prepItems } from '../../../components/PrepChecklist'
 import { sessionStartSeconds } from '../../../lib/time'
 import { EQUIPMENT, SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
@@ -221,7 +222,11 @@ export default function MySessionsPage() {
                     <dl className="mt-4 space-y-1.5">
                       {(() => {
                         const sc = schoolById.get(b.session!.schoolId ?? '')
-                        return sc ? <Fact label="School">{[sc.name, fullAddress(sc)].filter(Boolean).join(', ')}</Fact> : null
+                        return sc ? (
+                          <Fact label="School">
+                            {[sc.name, fullAddress(sc)].filter(Boolean).join(', ')} · <Directions school={sc} label="Directions & distance" />
+                          </Fact>
+                        ) : null
                       })()}
                       {b.details?.teacherName || b.details?.teacherEmail ? (
                         <Fact label="Teacher">

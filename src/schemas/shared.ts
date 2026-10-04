@@ -63,6 +63,23 @@ export const SELF_WITHDRAW_MIN_HOURS = 48
 export const EQUIPMENT = ['projector', 'screen_hdmi', 'whiteboard_markers', 'sharpies', 'paper', 'speakers', 'wifi'] as const
 export type Equipment = (typeof EQUIPMENT)[number]
 
+/**
+ * Thank-you perks for a booked volunteer (D20). The program pays through vouchers it
+ * creates with the vendor; the app only stores and shows the links. Each link must be
+ * on that vendor's own site. The dollar limits are set on the voucher itself — the
+ * amounts here are only what the screens say.
+ */
+export const PERKS = ['mealUberEats', 'mealGrubhub', 'rideDining', 'rideAirport'] as const
+export type Perk = (typeof PERKS)[number]
+export const PERK_HOSTS: Record<Perk, readonly string[]> = {
+  mealUberEats: ['ubereats.com', 'uber.com'],
+  mealGrubhub: ['grubhub.com'],
+  rideDining: ['uber.com'],
+  rideAirport: ['uber.com'],
+}
+export const MEAL_CAP_USD = 100
+export const AIRPORT_RIDE_CAP_USD = 120
+
 /** Vetting help (R7): default and maximum length of a grant, in days. */
 export const VETTING_HELP_DEFAULT_DAYS = 14
 export const VETTING_HELP_MAX_DAYS = 30
