@@ -44,6 +44,10 @@ The schools and addresses are real public listings from the San Diego Unified di
    - ✅ Saved; a reload keeps it.
 
 ## 3 · Volunteers apply (V1, V2)
+0. Signed out, open **Volunteer → Apply to volunteer**.
+   - ✅ The application form appears straight away; no login wall.
+   - ✅ Fill in a name and profession → **Create account and submit** opens *Create your volunteer account*.
+   - ✅ After continuing with Google or GitHub, you're back on the page with *Application submitted*, and schools and license upload are now available.
 1. Sign in as **V1**.
    - ✅ Nav is **My sessions · My teachers · Inbox · Profile**, with no board and no Settings.
    - ✅ Lands on **My sessions** with *Apply* status.

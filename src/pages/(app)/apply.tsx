@@ -1,26 +1,35 @@
 /**
- * Volunteer profile and application status (M1).
+ * Volunteer application, profile and status (M1, D22).
+ *
+ * Open to signed-out visitors (D22): they fill in the application FIRST. Pressing
+ * Submit keeps it in this tab (lib/application-draft) and opens the sign-in box to
+ * create their account (Google or GitHub). When they come back signed in, the draft is
+ * submitted with the normal saveProfile action — the server sees an ordinary,
+ * authenticated save. Schools and license files need an account, so they come after.
  *
  * Saving the profile for the first time submits the application. Changing your
  * profession or employer after vetting sends it back for review (M1-AC4) —
  * the form says so before you save.
  */
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { AuthOverlay } from 'deepspace'
 import { Badge, Button, Input, Textarea, useToast } from '@/components/ui'
-import { Fact, Field, Loading, Page, Panel, Section } from '../../../components/Page'
-import { callAction } from '../../../lib/actions'
-import { formatDay, PROGRAM_EMAIL, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABELS } from '../../../lib/labels'
-import { useMe } from '../../../lib/me'
-import { LicenseUploader } from '../../../components/LicenseFiles'
-import { CheckList, PickList, PickOrOther, SchoolPicker } from '../../../components/Pickers'
-import { ACCESS_NEEDS, LICENSE_TYPES, MAX_PREFERRED_SCHOOLS, PROFESSIONS, US_STATES, YEARS, joinAccessNeeds, splitAccessNeeds } from '../../../lib/options'
+import { Fact, Field, Loading, Page, Panel, Section } from '../../components/Page'
+import { callAction } from '../../lib/actions'
+import { formatDay, PROGRAM_EMAIL, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
+import { useMe } from '../../lib/me'
+import { LicenseUploader } from '../../components/LicenseFiles'
+import { clearDraft, loadDraft, saveDraft, type ApplicationDraft } from '../../lib/application-draft'
+import { signInCopy } from '../../lib/signin'
+import { CheckList, PickList, PickOrOther, SchoolPicker } from '../../components/Pickers'
+import { ACCESS_NEEDS, LICENSE_TYPES, MAX_PREFERRED_SCHOOLS, PROFESSIONS, US_STATES, YEARS, joinAccessNeeds, splitAccessNeeds } from '../../lib/options'
 
 const NEXT_STEP: Record<string, string> = {
   applied: 'The nonprofit will confirm your identity, check any professional license, and record your school clearance (TB test and background check), then decide.',
   vetted: 'Checks are done. The nonprofit admin makes the final decision.',
-  approved: 'You can claim sessions on the board.',
-  rejected: 'Program staff did not approve this application.',
+  approved: 'You can claim open sessions and accept teachers’ invitations in My sessions.',
+  rejected: 'The program admin did not approve this application.',
   declined: 'This application was not approved.',
   renewal_pending: 'Your clearance needs renewing before you can claim new sessions.',
 }
@@ -40,10 +49,20 @@ export default function ApplyPage() {
   const [prefSchools, setPrefSchools] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  // D22: signed out → keep the draft and create the account; signed in → submit it.
+  const [signIn, setSignIn] = useState(false)
+  const autoSubmitted = useRef(false)
 
   // Fill the form once from the saved profile.
   useEffect(() => {
     if (!me.ready || loaded) return
+    if (!me.signedIn) {
+      // Signed out: start from a draft kept in this tab, if any.
+      const d = loadDraft()
+      if (d) fillFromDraft(d)
+      setLoaded(true)
+      return
+    }
     setDisplayName(me.profile?.displayName ?? me.name ?? '')
     setProfession(me.profile?.profession ?? '')
     setEmployer(me.profile?.employer ?? '')
@@ -64,6 +83,56 @@ export default function ApplyPage() {
     setLoaded(true)
   }, [me.ready, me.profile, me.name, loaded])
 
+  // D22: just back from creating the account with a draft in hand → submit it once.
+  useEffect(() => {
+    if (!me.ready || !me.signedIn || autoSubmitted.current) return
+    const d = loadDraft()
+    if (!d) return
+    autoSubmitted.current = true
+    // Already a volunteer, a teacher or staff: don't file a second application.
+    if (me.volunteer || me.appRole || me.isStaff) {
+      clearDraft()
+      return
+    }
+    fillFromDraft(d)
+    void submit(payloadFrom(d), true)
+  }, [me.ready, me.signedIn, me.volunteer, me.appRole, me.isStaff])
+
+  function fillFromDraft(d: ApplicationDraft) {
+    setDisplayName(d.displayName)
+    setProfession(d.profession)
+    setEmployer(d.employer)
+    setExtra({ skills: d.skills, yearsExperience: d.yearsExperience, hobbies: d.hobbies, phone: d.phone, accessNeeds: d.accessNeeds, licenseType: d.licenseType, licenseNumber: d.licenseNumber, licenseState: d.licenseState })
+    setNeeds(splitAccessNeeds(d.accessNeeds))
+  }
+
+  function currentDraft(): ApplicationDraft {
+    return { displayName, profession, employer, ...extra, accessNeeds: joinAccessNeeds(needs.picked, needs.other) }
+  }
+
+  function payloadFrom(d: ApplicationDraft, schools: { district: string; ids: string[] } = { district: '', ids: [] }) {
+    return {
+      ...d,
+      yearsExperience: d.yearsExperience === '' ? null : Number(d.yearsExperience),
+      preferredDistrict: schools.district,
+      preferredSchools: schools.ids,
+    }
+  }
+
+  async function submit(payload: Record<string, unknown>, fromDraft = false) {
+    setSaving(true)
+    const res = await callAction<{ status: string; reset?: boolean }>('saveProfile', payload)
+    setSaving(false)
+    if (!res.success) {
+      toast.error(fromDraft ? 'Your account is ready, but the application didn’t go through' : 'Could not save', res.error)
+      return
+    }
+    if (fromDraft) clearDraft()
+    if (!status) toast.success('Application submitted', fromDraft ? 'Your account is ready. Add the schools you’d like and any license documents below.' : 'The nonprofit will review it.')
+    else if (res.data.reset) toast.info('Profile saved', 'Your application goes back for review because your work details changed.')
+    else toast.success('Profile saved')
+  }
+
   if (!me.ready) return <Loading />
 
   const status = me.volunteer?.status
@@ -79,29 +148,34 @@ export default function ApplyPage() {
 
   async function save(e: FormEvent) {
     e.preventDefault()
-    setSaving(true)
-    const res = await callAction<{ status: string; reset?: boolean }>('saveProfile', {
-      displayName,
-      profession,
-      employer,
-      ...extra,
-      accessNeeds: joinAccessNeeds(needs.picked, needs.other),
-      yearsExperience: extra.yearsExperience === '' ? null : Number(extra.yearsExperience),
-      preferredDistrict: prefDistrict,
-      preferredSchools: prefSchools,
-    })
-    setSaving(false)
-    if (!res.success) {
-      toast.error('Could not save', res.error)
+    if (!me.signedIn) {
+      // D22: keep the answers in this tab, then create the account.
+      if (!saveDraft(currentDraft())) toast.info('Heads up', 'Your browser blocks saving the form, so you may need to fill it in again after signing in.')
+      setSignIn(true)
       return
     }
-    if (!status) toast.success('Application submitted', 'The nonprofit will review it.')
-    else if (res.data.reset) toast.info('Profile saved', 'Your application goes back for review because your work details changed.')
-    else toast.success('Profile saved')
+    await submit(payloadFrom(currentDraft(), { district: prefDistrict, ids: prefSchools }))
   }
 
   return (
-    <Page title={status ? 'Your volunteer profile' : 'Volunteer with a class'} intro="Share what you do. Students see your name and profession when you visit; nothing else.">
+    <Page
+      title={status ? 'Your volunteer profile' : 'Apply to volunteer with a class'}
+      intro={
+        me.signedIn
+          ? 'Share what you do. Students see your name and profession when you visit; nothing else.'
+          : 'Tell us about your work. When you submit, you’ll create your account with Google or GitHub. The program admin then reviews your application.'
+      }
+    >
+      {!me.signedIn && (
+        <ol className="mb-8 grid gap-2 text-sm sm:grid-cols-4" aria-label="How applying works">
+          {['Fill in this form', 'Create your account', 'Admin reviews it', 'Pick a session'].map((t, i) => (
+            <li key={t} className={`flex items-center gap-2 rounded-md border px-3 py-2 ${i === 0 ? 'border-primary bg-card font-medium' : 'border-border text-muted-foreground'}`}>
+              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs ${i === 0 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{i + 1}</span>
+              {t}
+            </li>
+          ))}
+        </ol>
+      )}
       {status && (
         <Section title="Application status">
           <Panel>
@@ -118,8 +192,8 @@ export default function ApplyPage() {
               </dl>
             ) : null}
             {status === 'approved' && (
-              <Link to="/home" className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline">
-                Go to the session board
+              <Link to="/my-sessions" className="mt-4 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline">
+                Go to My sessions
               </Link>
             )}
             <p className="mt-4 text-xs text-muted-foreground">
@@ -133,7 +207,10 @@ export default function ApplyPage() {
         </Section>
       )}
 
-      <Section title="Profile" description={status ? undefined : 'Saving this submits your application.'}>
+      <Section
+        title={me.signedIn ? 'Profile' : 'Your application'}
+        description={status ? undefined : me.signedIn ? 'Saving this submits your application.' : 'Required: your name and profession. Everything else is optional.'}
+      >
         <Panel>
           <form onSubmit={save} className="space-y-5">
             <Field label="Your name" htmlFor="displayName" hint="As students and teachers will see it.">
@@ -174,6 +251,7 @@ export default function ApplyPage() {
               </div>
             </Field>
 
+            {me.signedIn ? (
             <fieldset className="space-y-3 rounded-md border border-border p-4">
               <legend className="px-1 text-sm font-semibold">Schools you’d like to visit (optional)</legend>
               <p className="text-xs text-muted-foreground">Their sessions show first for you, and the program admin sees your choice when assigning.</p>
@@ -185,6 +263,11 @@ export default function ApplyPage() {
                 max={MAX_PREFERRED_SCHOOLS}
               />
             </fieldset>
+            ) : (
+              <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                After you create your account you can pick the schools you’d like to visit and upload license documents.
+              </p>
+            )}
 
             <fieldset className="space-y-4 rounded-md border border-border p-4">
               <legend className="px-1 text-sm font-semibold">Professional license (if your field has one)</legend>
@@ -209,11 +292,19 @@ export default function ApplyPage() {
             )}
 
             <Button type="submit" loading={saving} disabled={!displayName.trim() || !profession.trim()}>
-              {status ? 'Save profile' : 'Submit application'}
+              {status ? 'Save profile' : me.signedIn ? 'Submit application' : 'Create account and submit'}
             </Button>
           </form>
         </Panel>
       </Section>
+
+      {signIn && !me.signedIn && (
+        <AuthOverlay
+          onClose={() => setSignIn(false)}
+          title={signInCopy('volunteer').title}
+          description="Your answers are saved on this device. Continue with Google or GitHub to create your account, and we’ll submit your application."
+        />
+      )}
 
       {me.userId && (
         <Section title="License documents">
