@@ -36,6 +36,7 @@ interface DetailsRow {
   sessionId: string
   teacherName?: string
   teacherEmail?: string
+  teacherPhone?: string
   startTime?: string
   classLabel?: string
   studentCount?: number | null
@@ -57,13 +58,14 @@ export default function MyTeachersPage() {
   const today = todaySeconds()
 
   // Group upcoming bookings by teacher.
-  const byTeacher = new Map<string, { teacherId: string; name: string; email: string; schoolId: string; items: { id: string; s: SessionRow; d?: DetailsRow; confirmed: boolean }[] }>()
+  const byTeacher = new Map<string, { teacherId: string; name: string; email: string; phone: string; schoolId: string; items: { id: string; s: SessionRow; d?: DetailsRow; confirmed: boolean }[] }>()
   for (const c of claims.records) {
     const s = sessionById.get(c.data.sessionId)
     if (!s || s.sessionDate < today || s.status === 'cancelled') continue
     const d = detailsById.get(c.data.sessionId)
-    const entry = byTeacher.get(s.teacherId) ?? { teacherId: s.teacherId, name: d?.teacherName || 'Teacher', email: d?.teacherEmail || '', schoolId: s.schoolId ?? '', items: [] }
+    const entry = byTeacher.get(s.teacherId) ?? { teacherId: s.teacherId, name: d?.teacherName || 'Teacher', email: d?.teacherEmail || '', phone: d?.teacherPhone || '', schoolId: s.schoolId ?? '', items: [] }
     if (!entry.email && d?.teacherEmail) entry.email = d.teacherEmail
+    if (!entry.phone && d?.teacherPhone) entry.phone = d.teacherPhone
     entry.items.push({ id: c.data.sessionId, s, d, confirmed: !!c.data.confirmedAt })
     byTeacher.set(s.teacherId, entry)
   }
@@ -88,6 +90,15 @@ export default function MyTeachersPage() {
                       {school ? [school.name, school.address, school.city].filter(Boolean).join(', ') : 'School not set'}
                     </p>
                   </div>
+                  <div className="flex flex-wrap gap-2">
+                  {t.phone ? (
+                    <a
+                      href={`tel:${t.phone.replace(/[^0-9+]/g, '')}`}
+                      className="inline-flex h-9 items-center rounded-md border border-border px-4 text-sm font-semibold hover:bg-accent"
+                    >
+                      Call {t.phone}
+                    </a>
+                  ) : null}
                   {t.email ? (
                     <a
                       href={`mailto:${t.email}?subject=${subject}`}
@@ -96,6 +107,7 @@ export default function MyTeachersPage() {
                       Email {t.name.split(' ')[0]}
                     </a>
                   ) : null}
+                  </div>
                 </div>
                 <ul className="mt-4 divide-y divide-border border-t border-border">
                   {t.items

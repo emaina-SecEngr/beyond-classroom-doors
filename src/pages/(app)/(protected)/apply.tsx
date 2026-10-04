@@ -13,6 +13,8 @@ import { callAction } from '../../../lib/actions'
 import { formatDay, PROGRAM_EMAIL, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABELS } from '../../../lib/labels'
 import { useMe } from '../../../lib/me'
 import { LicenseUploader } from '../../../components/LicenseFiles'
+import { CheckList, PickList, PickOrOther, SchoolPicker } from '../../../components/Pickers'
+import { ACCESS_NEEDS, LICENSE_TYPES, MAX_PREFERRED_SCHOOLS, PROFESSIONS, US_STATES, YEARS, joinAccessNeeds, splitAccessNeeds } from '../../../lib/options'
 
 const NEXT_STEP: Record<string, string> = {
   applied: 'The nonprofit will confirm your identity, check any professional license, and record your school clearance (TB test and background check), then decide.',
@@ -32,6 +34,10 @@ export default function ApplyPage() {
   // D12: richer profile and license details.
   const [extra, setExtra] = useState({ skills: '', yearsExperience: '', hobbies: '', phone: '', accessNeeds: '', licenseType: '', licenseNumber: '', licenseState: '' })
   const setX = (k: keyof typeof extra, v: string) => setExtra((x) => ({ ...x, [k]: v }))
+  // D17: access needs as a checklist plus "anything else"; preferred district and schools.
+  const [needs, setNeeds] = useState<{ picked: string[]; other: string }>({ picked: [], other: '' })
+  const [prefDistrict, setPrefDistrict] = useState('')
+  const [prefSchools, setPrefSchools] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
@@ -52,6 +58,9 @@ export default function ApplyPage() {
       licenseNumber: p?.licenseNumber ?? '',
       licenseState: p?.licenseState ?? '',
     })
+    setNeeds(splitAccessNeeds(p?.accessNeeds ?? ''))
+    setPrefDistrict(p?.preferredDistrict ?? '')
+    setPrefSchools(Array.isArray(p?.preferredSchools) ? p!.preferredSchools : [])
     setLoaded(true)
   }, [me.ready, me.profile, me.name, loaded])
 
@@ -76,7 +85,10 @@ export default function ApplyPage() {
       profession,
       employer,
       ...extra,
+      accessNeeds: joinAccessNeeds(needs.picked, needs.other),
       yearsExperience: extra.yearsExperience === '' ? null : Number(extra.yearsExperience),
+      preferredDistrict: prefDistrict,
+      preferredSchools: prefSchools,
     })
     setSaving(false)
     if (!res.success) {
@@ -127,15 +139,15 @@ export default function ApplyPage() {
             <Field label="Your name" htmlFor="displayName" hint="As students and teachers will see it.">
               <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={80} required autoComplete="name" />
             </Field>
-            <Field label="Profession" htmlFor="profession" hint="For example: Registered nurse, Electrician, Civil engineer.">
-              <Input id="profession" value={profession} onChange={(e) => setProfession(e.target.value)} maxLength={80} required />
+            <Field label="Profession" htmlFor="profession" hint="Pick the closest, or choose Other and type yours.">
+              <PickOrOther id="profession" options={PROFESSIONS} value={profession} onChange={setProfession} placeholder="Choose your profession" otherPlaceholder="Your profession" />
             </Field>
             <div className="grid gap-5 sm:grid-cols-2">
               <Field label="Company you work for (optional)" htmlFor="employer">
                 <Input id="employer" value={employer} onChange={(e) => setEmployer(e.target.value)} maxLength={120} autoComplete="organization" />
               </Field>
               <Field label="Years of experience (optional)" htmlFor="years">
-                <Input id="years" type="number" inputMode="numeric" min={0} max={70} value={extra.yearsExperience} onChange={(e) => setX('yearsExperience', e.target.value)} />
+                <PickList id="years" options={YEARS} value={extra.yearsExperience} onChange={(v) => setX('yearsExperience', v)} placeholder="Choose" noneLabel="Prefer not to say" />
               </Field>
             </div>
             <Field label="Skills (optional)" htmlFor="skills" hint="What you could show or talk about. For example: wound care, wiring a panel, CAD drawings.">
@@ -154,22 +166,37 @@ export default function ApplyPage() {
             <Field
               label="Anything that would help you on the day? (optional)"
               htmlFor="access"
-              hint="For example: a step-free route, parking close to the entrance, a chair at the front. No need to say why. Shared only with the teacher and school staff for sessions you book."
+              hint="Tick anything that helps. No need to say why. Shared only with the teacher and school staff for sessions you book."
             >
-              <Textarea id="access" rows={2} value={extra.accessNeeds} onChange={(e) => setX('accessNeeds', e.target.value)} maxLength={300} />
+              <div className="space-y-3">
+                <CheckList options={ACCESS_NEEDS} value={needs.picked} onChange={(picked) => setNeeds((n) => ({ ...n, picked }))} />
+                <Input id="access" aria-label="Anything else" value={needs.other} onChange={(e) => setNeeds((n) => ({ ...n, other: e.target.value }))} maxLength={150} placeholder="Anything else (optional)" />
+              </div>
             </Field>
+
+            <fieldset className="space-y-3 rounded-md border border-border p-4">
+              <legend className="px-1 text-sm font-semibold">Schools you’d like to visit (optional)</legend>
+              <p className="text-xs text-muted-foreground">Their sessions show first for you, and the program admin sees your choice when assigning.</p>
+              <SchoolPicker
+                district={prefDistrict}
+                onDistrict={(d) => setPrefDistrict(d)}
+                value={prefSchools}
+                onChange={setPrefSchools}
+                max={MAX_PREFERRED_SCHOOLS}
+              />
+            </fieldset>
 
             <fieldset className="space-y-4 rounded-md border border-border p-4">
               <legend className="px-1 text-sm font-semibold">Professional license (if your field has one)</legend>
-              <div className="grid gap-4 sm:grid-cols-[1fr_1fr_6rem]">
+              <div className="grid gap-4 sm:grid-cols-[1fr_1fr_7rem]">
                 <Field label="License type" htmlFor="lic-type">
-                  <Input id="lic-type" value={extra.licenseType} onChange={(e) => setX('licenseType', e.target.value)} maxLength={80} placeholder="Registered Nurse" />
+                  <PickOrOther id="lic-type" options={LICENSE_TYPES} value={extra.licenseType} onChange={(v) => setX('licenseType', v)} noneLabel="No license" placeholder="No license" otherPlaceholder="License type" />
                 </Field>
                 <Field label="License number" htmlFor="lic-num">
                   <Input id="lic-num" value={extra.licenseNumber} onChange={(e) => setX('licenseNumber', e.target.value)} maxLength={40} />
                 </Field>
                 <Field label="State" htmlFor="lic-state">
-                  <Input id="lic-state" value={extra.licenseState} onChange={(e) => setX('licenseState', e.target.value.toUpperCase())} maxLength={2} placeholder="CA" />
+                  <PickList id="lic-state" options={US_STATES} value={extra.licenseState} onChange={(v) => setX('licenseState', v)} placeholder="CA" />
                 </Field>
               </div>
               <p className="text-xs text-muted-foreground">The program admin checks this on the state’s public license lookup.</p>

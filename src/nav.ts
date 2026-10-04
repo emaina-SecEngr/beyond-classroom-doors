@@ -34,6 +34,8 @@ export const nav: NavItem[] = [
   { path: '/approvals', label: 'Approvals', roles: ['admin'], show: 'approvers' },
   { path: '/home', label: 'Program board', show: 'team' },
   { path: '/teach', label: 'Teacher desk', show: 'teacher' },
+  { path: '/my-volunteers', label: 'My volunteers', show: 'teacher' },
+  { path: '/teacher-profile', label: 'Profile', show: 'teacher' },
   // Staff desk: program staff and the program admin (DeepSpace admin). The teacher
   // desk is an app role, so it's linked from the board instead.
   { path: '/staff', label: 'School', roles: ['admin'] },

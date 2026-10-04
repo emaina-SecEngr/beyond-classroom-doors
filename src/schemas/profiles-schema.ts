@@ -28,6 +28,9 @@ export const profilesSchema: CollectionSchema = {
     { name: 'licenseType', storage: 'text', interpretation: 'plain' },
     { name: 'licenseNumber', storage: 'text', interpretation: 'plain' },
     { name: 'licenseState', storage: 'text', interpretation: 'plain' },
+    // D17: where the volunteer would like to go — a district and up to five school IDs.
+    { name: 'preferredDistrict', storage: 'text', interpretation: 'plain' },
+    { name: 'preferredSchools', storage: 'text', interpretation: { kind: 'json' } },
   ],
   uniqueOn: ['userId'],
   ownerField: 'userId',

@@ -43,6 +43,8 @@ import { useMe } from '../../../lib/me'
 import { useSchools } from '../../../lib/schools'
 import { ProposalBanner, ProposeDateButton } from '../../../components/DateProposal'
 import { OpenSessions } from '../../../components/OpenSessions'
+import { MyInvitations } from '../../../components/MyInvitations'
+import { PrepChecklistView, prepItems } from '../../../components/PrepChecklist'
 import { sessionStartSeconds } from '../../../lib/time'
 import { EQUIPMENT, SELF_WITHDRAW_MIN_HOURS, type SessionStatus, type TimeBand } from '../../../schemas/shared'
 
@@ -65,6 +67,7 @@ interface SessionRow {
 }
 interface DetailsRow {
   sessionId: string
+  prepChecklist?: unknown
   room: string
   startTime: string
   arrivalNote: string
@@ -76,6 +79,7 @@ interface DetailsRow {
   equipmentReady?: string[]
   teacherName?: string
   teacherEmail?: string
+  teacherPhone?: string
   accessNeeds?: string
   readyAt?: number | null
   proposedDate?: number | null
@@ -172,11 +176,12 @@ export default function MySessionsPage() {
     <Page title="My sessions" intro="Your career sessions. Confirm you’re coming, tell the teacher what you need, and let the school know early if plans change.">
       {loadError && <ErrorNote message={loadError} />}
       <ApplicationStatus volunteer={me.volunteer} canClaim={me.canClaim} />
+      {me.userId && <MyInvitations volunteerId={me.userId} canClaim={me.canClaim} />}
 
       {!me.canClaim && bookings.length === 0 && (
         <EmptyState
           title="No sessions yet"
-          description={me.volunteer ? 'Once you’re approved, claim a session from the board.' : 'Apply to volunteer first. The nonprofit vets and its board approves every volunteer.'}
+          description={me.volunteer ? 'Once you’re approved, open sessions and teachers’ invitations appear here.' : 'Apply to volunteer first. The program admin reviews and approves every volunteer.'}
         />
       )}
 
@@ -232,6 +237,14 @@ export default function MySessionsPage() {
                               </a>
                             </>
                           )}
+                          {b.details?.teacherPhone && (
+                            <>
+                              {' · '}
+                              <a className="text-primary underline-offset-4 hover:underline" href={`tel:${b.details.teacherPhone.replace(/[^0-9+]/g, '')}`}>
+                                Call {b.details.teacherPhone}
+                              </a>
+                            </>
+                          )}
                         </Fact>
                       ) : null}
                       <Fact label="Room">{b.details?.room || 'Not set yet — the teacher or program staff will add it'}</Fact>
@@ -244,6 +257,9 @@ export default function MySessionsPage() {
                         <Fact label="Class size">About {b.session!.expectedHeadcount} students</Fact>
                       ) : null}
                     </dl>
+                    <div className="mt-4">
+                      <PrepChecklistView items={prepItems(b.details?.prepChecklist)} />
+                    </div>
 
                     {b.details?.proposedDate ? (
                       <ProposalBanner
@@ -285,7 +301,7 @@ export default function MySessionsPage() {
 
       {me.canClaim && (
         <Section title="Open sessions" description="Sessions teachers have asked for that still need a volunteer. Claim one and the teacher is told right away.">
-          <OpenSessions canClaim emptyDescription="New requests appear here as teachers post them." />
+          <OpenSessions canClaim preferredSchools={Array.isArray(me.profile?.preferredSchools) ? me.profile!.preferredSchools : []} emptyDescription="New requests appear here as teachers post them." />
         </Section>
       )}
 

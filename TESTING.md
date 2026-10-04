@@ -37,17 +37,29 @@ The schools and addresses are real public listings from the San Diego Unified di
 4. **Program board**.
    - ✅ Four open sessions, filterable by school. Each shows grade, topic and time.
 
+## 2b · Teacher profile (T1)
+1. As **T1** → **Profile**.
+   - ✅ School shows *Lincoln High* with its address, and can't be edited.
+2. Set the name *Ms. Rivera*, subject *Health Science / Medical*, grades 11 and 12, phone *619-555-0100* → **Save**.
+   - ✅ Saved; a reload keeps it.
+
 ## 3 · Volunteers apply (V1, V2)
 1. Sign in as **V1**.
    - ✅ Nav is **My sessions · My teachers · Inbox · Profile**, with no board and no Settings.
    - ✅ Lands on **My sessions** with *Apply* status.
-2. **Profile**: fill in name, profession (e.g. *Registered Nurse*), employer, skills, years, hobbies, phone, and access needs (e.g. *Uses a wheelchair; needs a ground-floor room*). Add a license type, number and state, upload a small PDF, then **Save**.
-   - ✅ Status *Applied*.
+2. **Profile**: fill in the form using the dropdowns:
+   - Name, employer, skills, hobbies and phone are typed.
+   - **Profession**: pick *Registered Nurse*. Try *Other…*: a text box appears.
+   - **Years of experience**: pick from the list.
+   - **Access needs**: tick *Step-free / wheelchair-accessible route* and *Elevator or ground-floor room*.
+   - **Schools you'd like to visit**: district *San Diego Unified*, then tick **Lincoln High** and **Hoover High**.
+   - **License type**: *Registered Nurse (RN)*. Enter a number, pick state *CA*, upload a small PDF, then **Save**.
+   - ✅ Status *Applied*. Reloading the page shows every choice still selected.
 3. **V2**: same steps, minimal profile.
 
 ## 4 · Admin decides (A) — the decision is final
 1. **Approvals → Waiting**.
-   - ✅ V1 and V2 are listed. Opening one shows the profile, license details and the uploaded file.
+   - ✅ V1 and V2 are listed. Opening one shows the profile, *Schools they'd like* (Hoover High, Lincoln High), license details and the uploaded file.
 2. **Open the license file**.
    - ✅ The PDF opens in the viewer. *This has not been verified live yet, so check it carefully.*
 3. **Approve V1** (identity confirmed, clearance date a year out). **Reject V2** with a reason.
@@ -62,19 +74,41 @@ The schools and addresses are real public listings from the San Diego Unified di
    - ✅ No open sessions to claim.
 
 ## 5 · Booking and prep (V1, T1)
-1. **V1** claims the Lincoln *Healthcare* session.
-   - ✅ It moves to their booked list with school, teacher, room, class (*Period 2 · Health Science*) and 28 students.
-2. **V1**: request equipment (projector, markers…) and confirm availability.
-3. **V1 → My teachers**.
-   - ✅ Card for T1 with Lincoln High and its address, an **Email** button, and the session.
+1. **V1 → My sessions → Open sessions**.
+   - ✅ The Lincoln and Hoover sessions come first, each with a **Your school** badge.
+2. **V1** claims the Lincoln *Healthcare* session.
+   - ✅ It moves to their booked list with school, room, class (*Period 2 · Health Science*) and 28 students.
+   - ✅ Teacher shows **Ms. Rivera · Email · Call 619-555-0100**.
+3. **V1**: request equipment (projector, markers…) and confirm availability.
+4. **V1 → My teachers**.
+   - ✅ Card for Ms. Rivera with Lincoln High and its address, plus **Call** and **Email** buttons and the session.
    - ✅ **Open** goes back to the session.
-4. **T1 → Teacher desk**.
+5. **T1 → Teacher desk**.
    - ✅ Booked volunteer shows with **Email** and **Call**.
    - ✅ Access needs text appears (*To help them on the day…*).
    - ✅ The notification T1 got says only that access needs exist, not what they are.
-5. **T1**: tick the equipment as ready → **Class is ready** with a note.
+6. **T1**: tick the equipment as ready → **Class is ready** with a note.
    - ✅ V1's inbox gets the message.
    - ✅ The session shows *Class ready*.
+
+## 5b · Teacher's My volunteers (T1, V1)
+1. **T1 → My volunteers → Booked with you**.
+   - ✅ V1's card shows date, class, Email/Call, access needs and *Prep 0/0*.
+2. Add suggested items (*Visitor sign-in…*, *Parking pass…*) and one of your own (*Bring a stethoscope to demo*). Tick one.
+   - ✅ The badge shows *Prep 1/3*.
+   - ✅ **V1 → My sessions** shows *What the school is preparing*, with the ticked item.
+3. **T1 → Approved volunteers**.
+   - ✅ V1 is listed with *Picked your school*, profession and skills.
+   - ✅ **No email, phone or access needs** are shown for anyone.
+   - ✅ V2 (rejected) isn't listed.
+4. As **T1** on the Teacher desk, post one more session about two weeks out. Then **My volunteers → Approved → Invite to a session**: pick it, add a message, keep *Include my email* ticked → **Send**.
+   - ✅ V1's **Inbox** has *Ms. Rivera invited you…* with no email address in it.
+   - ✅ **My sessions → Invitations** shows the card with **Claim**, **Decline** and **Reply by email**.
+5. **V1 → Decline**.
+   - ✅ T1's inbox says *can't make it*.
+   - ✅ Inviting V1 to the same session again is refused.
+6. Optional: invite again to another session and **Claim** it.
+   - ✅ It moves to Upcoming, and T1 sees it under **Booked with you**.
 
 ## 6 · Change of date (T1 ↔ V1)
 1. **T1 → Propose another date** with a reason.
@@ -85,7 +119,8 @@ The schools and addresses are real public listings from the San Diego Unified di
    - ✅ The date stays the same.
 
 ## 7 · Admin assigns and staff (A, S)
-1. **A → School** (choose Hoover) → **Assign volunteer** → V1 to a Hoover session.
+1. **A → School** (choose Hoover) → **Assign volunteer**.
+   - ✅ V1 is listed first with *prefers this school*. Book V1 onto a Hoover session.
    - ✅ It appears in V1's My sessions and My teachers (T2).
 2. **A → Approvals → Delegate & staff**: make **S** staff (S must have signed in once) and assign them to Lincoln High.
 3. **S**.
@@ -110,9 +145,11 @@ The schools and addresses are real public listings from the San Diego Unified di
 |---|---|---|
 | 1 |  |  |
 | 2 |  |  |
+| 2b |  |  |
 | 3 |  |  |
 | 4 |  |  |
 | 5 |  |  |
+| 5b |  |  |
 | 6 |  |  |
 | 7 |  |  |
 | 8 |  |  |

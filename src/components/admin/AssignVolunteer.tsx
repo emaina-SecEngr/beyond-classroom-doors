@@ -10,7 +10,7 @@ import { Field } from '../Page'
 import { callAction } from '../../lib/actions'
 import type { ProfileRow } from '../../lib/me'
 
-export function AssignVolunteerButton({ sessionId, label }: { sessionId: string; label: string }) {
+export function AssignVolunteerButton({ sessionId, label, schoolId }: { sessionId: string; label: string; schoolId?: string }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [pick, setPick] = useState('')
@@ -21,8 +21,12 @@ export function AssignVolunteerButton({ sessionId, label }: { sessionId: string;
   const byId = new Map(profiles.records.map((r) => [r.data.userId, r.data]))
   const eligible = statuses.records
     .filter((r) => (r.data.clearanceExpiresAt ?? 0) > now)
-    .map((r) => ({ id: r.data.userId, p: byId.get(r.data.userId) }))
-    .sort((a, b) => (a.p?.displayName ?? '').localeCompare(b.p?.displayName ?? ''))
+    .map((r) => {
+      const p = byId.get(r.data.userId)
+      return { id: r.data.userId, p, prefers: !!schoolId && Array.isArray(p?.preferredSchools) && p!.preferredSchools.includes(schoolId) }
+    })
+    // D17: volunteers who chose this school come first.
+    .sort((a, b) => Number(b.prefers) - Number(a.prefers) || (a.p?.displayName ?? '').localeCompare(b.p?.displayName ?? ''))
 
   async function assign() {
     setBusy(true)
@@ -59,7 +63,7 @@ export function AssignVolunteerButton({ sessionId, label }: { sessionId: string;
                 <SelectContent>
                   {eligible.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {(v.p?.displayName ?? 'Unknown') + (v.p?.profession ? ` · ${v.p.profession}` : '')}
+                      {(v.p?.displayName ?? 'Unknown') + (v.p?.profession ? ` · ${v.p.profession}` : '') + (v.prefers ? ' · prefers this school' : '')}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -12,9 +12,11 @@ import { useQuery, useUsers } from 'deepspace'
 import { Badge, Button, Checkbox, ConfirmModal, EmptyState, Input, Modal, useToast } from '@/components/ui'
 import { ErrorNote, Field, Loading } from '../Page'
 import { callAction } from '../../lib/actions'
+import { CITIES, DISTRICTS } from '../../lib/options'
+import { PickOrOther } from '../Pickers'
 import { useSchools, type SchoolRecord } from '../../lib/schools'
 
-const EMPTY = { name: '', district: '', city: '', address: '', active: true }
+const EMPTY = { name: '', district: 'San Diego Unified', city: 'San Diego', address: '', active: true }
 
 interface InviteRow {
   email: string
@@ -219,10 +221,10 @@ export function Schools({ editable }: { editable: boolean }) {
               </Field>
             </div>
             <Field label="District" htmlFor="sch-district">
-              <Input id="sch-district" value={form.district} onChange={(e) => set('district', e.target.value)} maxLength={80} />
+              <PickOrOther id="sch-district" options={DISTRICTS} value={form.district} onChange={(v) => set('district', v)} placeholder="Choose a district" otherPlaceholder="District name" />
             </Field>
             <Field label="City" htmlFor="sch-city">
-              <Input id="sch-city" value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={60} />
+              <PickOrOther id="sch-city" options={CITIES} value={form.city} onChange={(v) => set('city', v)} placeholder="Choose a city" otherPlaceholder="City" maxLength={60} />
             </Field>
             <div className="sm:col-span-2">
               <Field label="Front-office address" htmlFor="sch-address" hint="Shown to a volunteer once they book a session here.">

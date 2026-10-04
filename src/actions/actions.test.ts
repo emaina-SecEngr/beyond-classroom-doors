@@ -655,6 +655,12 @@ describe('confirm and withdraw (standing tests 15, 16)', () => {
     const soon = await call('createSessionRequest', 'u_teacher', { grade: '10', topic: 'engineering', sessionDate: futureDate(1), timeBand: 'afternoon', startTime: '23:00' })
     const id = (soon as { data: { sessionId: string } }).data.sessionId
     await call('claimSession', 'u_vol', { sessionId: id })
+    // Pin the start inside the 48-hour window whatever the time of day the suite runs:
+    // ~30 hours from now, as a San Diego calendar date + local start time.
+    const startIn = Math.floor(Date.now() / 1000) + 30 * 3600
+    const laDate = new Date(startIn * 1000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) // YYYY-MM-DD
+    db.get('session_requests')!.get(id)!.sessionDate = Date.parse(`${laDate}T00:00:00Z`) / 1000
+    db.get('session_details')!.get(id)!.startTime = new Date(startIn * 1000).toLocaleTimeString('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hour12: false })
     expect(await call('withdrawClaim', 'u_vol', { sessionId: id })).toMatchObject({ success: false, code: 'too_late' })
     expect((await call('requestChange', 'u_vol', { sessionId: id, kind: 'cancel', note: 'Sick' })).success).toBe(true)
   })
@@ -744,5 +750,121 @@ describe('D16 · test session dates', () => {
       expect(day).toBeGreaterThanOrEqual(1)
       expect(day).toBeLessThanOrEqual(5)
     }
+  })
+})
+
+describe('D17 · dropdown-backed profiles', () => {
+  const base = { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital' }
+
+  it('saves preferred district and schools — only real, active schools, at most five', async () => {
+    expect((await call('saveProfile', 'u_vol', { ...base, preferredDistrict: 'San Diego Unified', preferredSchools: [SCHOOL] })).success).toBe(true)
+    expect(row('profiles', 'u_vol')).toMatchObject({ preferredDistrict: 'San Diego Unified', preferredSchools: [SCHOOL] })
+    expect(await call('saveProfile', 'u_vol', { ...base, preferredSchools: ['nope'] })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('saveProfile', 'u_vol', { ...base, preferredSchools: 'not-a-list' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('saveProfile', 'u_vol', { ...base, preferredSchools: ['a', 'b', 'c', 'd', 'e', 'f'] })).toMatchObject({ success: false, code: 'invalid_input' })
+    await call('updateSchool', OWNER, { schoolId: SCHOOL, name: 'Lincoln High', active: false })
+    expect(await call('saveProfile', 'u_vol', { ...base, preferredSchools: [SCHOOL] })).toMatchObject({ success: false, code: 'invalid_input' })
+  })
+
+  it('preferences do not send an approved volunteer back for review', async () => {
+    expect(await call('saveProfile', 'u_vol', { ...base, preferredSchools: [SCHOOL] })).toMatchObject({ success: true, data: { status: 'approved' } })
+  })
+
+  it('license state must come from the list', async () => {
+    expect(await call('saveProfile', 'u_applicant', { ...base, licenseState: 'ZZ' })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect((await call('saveProfile', 'u_applicant', { ...base, licenseState: 'ca' })).success).toBe(true)
+  })
+
+  it('only teachers save a teacher profile; grades must be 9–12', async () => {
+    expect(await call('saveTeacherProfile', 'u_vol', { displayName: 'X' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('saveTeacherProfile', 'u_teacher', { displayName: 'Ms. Rivera', grades: ['8'] })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('saveTeacherProfile', 'u_teacher', { displayName: 'Ms. Rivera', phone: 'call me' })).toMatchObject({ success: false, code: 'invalid_input' })
+    const r = await call('saveTeacherProfile', 'u_teacher', { displayName: 'Ms. Rivera', subject: 'Health Science / Medical', grades: ['12', '11'], phone: '619-555-0100' })
+    expect(r.success).toBe(true)
+    expect(row('teacher_profiles', 'u_teacher')).toMatchObject({ displayName: 'Ms. Rivera', grades: ['11', '12'], phone: '619-555-0100' })
+    // The teacher can't move themselves to another school through their profile.
+    expect(row('role_assignments', 'u_teacher')).toMatchObject({ schoolId: SCHOOL })
+  })
+
+  it('booking shares the teacher’s profile name and phone with the volunteer', async () => {
+    await call('saveTeacherProfile', 'u_teacher', { displayName: 'Ms. Rivera', phone: '619-555-0100' })
+    expect((await call('claimSession', 'u_vol', { sessionId: S })).success).toBe(true)
+    expect(row('session_details', S)).toMatchObject({ teacherName: 'Ms. Rivera', teacherPhone: '619-555-0100' })
+    // …and no notification carries the phone number.
+    expect(rows('notifications').some((n) => JSON.stringify(n).includes('555-0100'))).toBe(false)
+  })
+})
+
+describe('D17 · access-needs checklist round-trip', () => {
+  it('splits and joins without losing the free text', async () => {
+    const { joinAccessNeeds, splitAccessNeeds, ACCESS_NEEDS } = await import('../lib/options')
+    const text = joinAccessNeeds([ACCESS_NEEDS[2], ACCESS_NEEDS[0]], 'Service dog')
+    expect(text).toBe(`${ACCESS_NEEDS[0]}; ${ACCESS_NEEDS[2]}; Service dog`)
+    expect(splitAccessNeeds(text)).toEqual({ picked: [ACCESS_NEEDS[0], ACCESS_NEEDS[2]], other: 'Service dog' })
+    expect(splitAccessNeeds('a step-free route')).toEqual({ picked: [], other: 'a step-free route' })
+  })
+})
+
+describe('D18 · teacher: approved volunteers, invitations, prep checklist', () => {
+  it('only teachers can list approved volunteers, and they get the work profile only', async () => {
+    expect(await call('teacherVolunteerDirectory', 'u_vol', {})).toMatchObject({ success: false, code: 'forbidden' })
+    await call('saveProfile', 'u_vol', { displayName: 'u_vol', profession: 'Nurse', employer: 'Hospital', phone: '619-555-0199', accessNeeds: 'Elevator or ground-floor room', preferredSchools: [SCHOOL] })
+    const r = (await call('teacherVolunteerDirectory', 'u_teacher', {})) as { success: true; data: { volunteers: Record<string, unknown>[] } }
+    expect(r.success).toBe(true)
+    const ids = r.data.volunteers.map((v) => v.volunteerId)
+    expect(ids).toContain('u_vol')
+    expect(ids).not.toContain('u_applicant') // not approved
+    expect(ids).not.toContain('u_expired') // clearance lapsed
+    expect(r.data.volunteers[0]).toMatchObject({ volunteerId: 'u_vol', prefersMySchool: true })
+    const leaked = JSON.stringify(r.data)
+    for (const secret of ['619-555-0199', 'ground-floor', '@example.org']) expect(leaked).not.toContain(secret)
+  })
+
+  it('a teacher invites an approved volunteer to her own open session; the volunteer is notified without contact details', async () => {
+    const res = await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol', note: 'Come talk nursing!', shareEmail: true })
+    expect(res.success).toBe(true)
+    const inv = rows('session_invites')[0]
+    expect(inv).toMatchObject({ sessionId: S, volunteerId: 'u_vol', teacherId: 'u_teacher', status: 'pending', replyEmail: 'u_teacher@example.org', collaborators: ['u_teacher'] })
+    const n = rows('notifications').find((x) => x.recipientId === 'u_vol' && x.kind === 'session_invite')!
+    expect(n).toBeTruthy()
+    expect(JSON.stringify(n)).not.toContain('@example.org')
+    // No duplicate invite for the same session and volunteer.
+    expect(await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol' })).toMatchObject({ success: false, code: 'duplicate' })
+  })
+
+  it('refuses invites to someone else’s session, to unapproved volunteers, and from non-teachers', async () => {
+    expect(await call('inviteVolunteer', 'u_teacher2', { sessionId: S, volunteerId: 'u_vol' })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_applicant' })).toMatchObject({ success: false, code: 'not_approved' })
+    expect(await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_expired' })).toMatchObject({ success: false, code: 'not_approved' })
+    expect(await call('inviteVolunteer', 'u_vol2', { sessionId: S, volunteerId: 'u_vol' })).toMatchObject({ success: false, code: 'forbidden' })
+  })
+
+  it('claiming settles invitations: the claimant’s is accepted, others close', async () => {
+    await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol' })
+    await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol2' })
+    expect((await call('claimSession', 'u_vol', { sessionId: S })).success).toBe(true)
+    expect(rows('session_invites').find((i) => i.volunteerId === 'u_vol')).toMatchObject({ status: 'accepted' })
+    expect(rows('session_invites').find((i) => i.volunteerId === 'u_vol2')).toMatchObject({ status: 'closed' })
+    expect(await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol2' })).toMatchObject({ success: false, code: 'stale_state' })
+  })
+
+  it('only the invited volunteer can decline; the teacher is told; no re-invite to the same session', async () => {
+    await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol' })
+    const id = [...db.get('session_invites')!.keys()][0]
+    expect(await call('respondToInvite', 'u_vol2', { inviteId: id })).toMatchObject({ success: false, code: 'not_found' })
+    expect((await call('respondToInvite', 'u_vol', { inviteId: id })).success).toBe(true)
+    expect(row('session_invites', id)).toMatchObject({ status: 'declined' })
+    expect(rows('notifications').some((x) => x.recipientId === 'u_teacher' && x.kind === 'session_invite')).toBe(true)
+    expect(await call('inviteVolunteer', 'u_teacher', { sessionId: S, volunteerId: 'u_vol' })).toMatchObject({ success: false, code: 'stale_state' })
+  })
+
+  it('prep checklist: the teacher (or her school’s staff) edits it; the volunteer can’t; labels are validated', async () => {
+    const items = [{ label: 'Room booked', done: true }, { label: 'Parking pass or directions sent', done: false }]
+    expect(await call('updatePrepChecklist', 'u_teacher', { sessionId: S, items })).toMatchObject({ success: true, data: { done: 1, total: 2 } })
+    expect(row('session_details', S)).toMatchObject({ prepChecklist: items })
+    expect(await call('updatePrepChecklist', 'u_vol', { sessionId: S, items })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('updatePrepChecklist', 'u_teacher2', { sessionId: S, items })).toMatchObject({ success: false, code: 'forbidden' })
+    expect(await call('updatePrepChecklist', 'u_teacher', { sessionId: S, items: [{ label: '' }] })).toMatchObject({ success: false, code: 'invalid_input' })
+    expect(await call('updatePrepChecklist', 'u_teacher', { sessionId: S, items: Array.from({ length: 16 }, (_, i) => ({ label: `item ${i}` })) })).toMatchObject({ success: false, code: 'invalid_input' })
   })
 })

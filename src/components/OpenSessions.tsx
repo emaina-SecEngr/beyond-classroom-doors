@@ -26,6 +26,8 @@ interface SessionRow {
 }
 
 export interface BoardItem {
+  /** D17: at one of the viewer's preferred schools. */
+  preferred?: boolean
   id: string
   grade: string
   topic: string
@@ -36,7 +38,7 @@ export interface BoardItem {
   schoolName?: string
 }
 
-export function OpenSessions({ canClaim, emptyDescription }: { canClaim: boolean; emptyDescription: string }) {
+export function OpenSessions({ canClaim, emptyDescription, preferredSchools = [] }: { canClaim: boolean; emptyDescription: string; preferredSchools?: string[] }) {
   const toast = useToast()
   const { records, status, error } = useQuery<SessionRow>('session_requests', {
     where: { status: 'open' },
@@ -54,7 +56,9 @@ export function OpenSessions({ canClaim, emptyDescription }: { canClaim: boolean
   const schoolsOnBoard = schools.filter((sc) => upcoming.some((r) => r.data.schoolId === sc.id))
   const items: BoardItem[] = upcoming
     .filter((r) => schoolFilter === '__all__' || r.data.schoolId === schoolFilter)
-    .map((r) => ({ id: r.recordId, ...r.data, schoolName: schoolById.get(r.data.schoolId ?? '')?.name }))
+    .map((r) => ({ id: r.recordId, ...r.data, schoolName: schoolById.get(r.data.schoolId ?? '')?.name, preferred: preferredSchools.includes(r.data.schoolId ?? '') }))
+    // D17: sessions at the volunteer's chosen schools first, each group by date.
+    .sort((a, b) => Number(!!b.preferred) - Number(!!a.preferred) || a.sessionDate - b.sessionDate)
 
   async function claim() {
     if (!pending) return
@@ -138,6 +142,7 @@ export function BoardList({ items, renderAction }: { items: BoardItem[]; renderA
               {item.expectedHeadcount ? ` · about ${item.expectedHeadcount} students` : ''}
             </p>
           </div>
+          {item.preferred ? <Badge variant="success">Your school</Badge> : null}
           <Badge variant="info">Open</Badge>
           <div className="shrink-0">{renderAction(item)}</div>
         </li>

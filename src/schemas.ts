@@ -14,6 +14,8 @@ import { vettingHelpSchema } from './schemas/vetting-help-schema'
 import { schoolsSchema } from './schemas/schools-schema'
 import { teacherInvitesSchema } from './schemas/teacher-invites-schema'
 import { staffSchoolsSchema } from './schemas/staff-schools-schema'
+import { teacherProfilesSchema } from './schemas/teacher-profiles-schema'
+import { sessionInvitesSchema } from './schemas/session-invites-schema'
 import { licenseFilesSchema } from './schemas/license-files-schema'
 
 /**
@@ -36,5 +38,7 @@ export const schemas: CollectionSchema[] = [
   schoolsSchema,
   teacherInvitesSchema,
   staffSchoolsSchema,
+  teacherProfilesSchema,
+  sessionInvitesSchema,
   licenseFilesSchema,
 ]

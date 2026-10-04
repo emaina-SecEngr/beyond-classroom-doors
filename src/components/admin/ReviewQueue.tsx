@@ -17,6 +17,7 @@ import {
 import { Fact, Field } from '../Page'
 import { LicenseFileList } from '../LicenseFiles'
 import { callAction } from '../../lib/actions'
+import { useSchools } from '../../lib/schools'
 import { formatInstant, todayInSanDiego, VOLUNTEER_STATUS_BADGE, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import type { ProfileRow } from '../../lib/me'
 import type { Access, StatusRow } from './shared'
@@ -35,6 +36,7 @@ const EMPTY_VET = {
 
 export function ReviewQueue({ queue, access }: { queue: Applicant[]; access: Access }) {
   const toast = useToast()
+  const { byId: schoolById } = useSchools()
   const [open, setOpen] = useState<Applicant | null>(null)
   const [form, setForm] = useState(EMPTY_VET)
   const [busy, setBusy] = useState(false)
@@ -118,6 +120,11 @@ export function ReviewQueue({ queue, access }: { queue: Applicant[]; access: Acc
                 <Fact label="Experience">{open.profile?.yearsExperience != null ? `${open.profile.yearsExperience} years` : '—'}</Fact>
                 <Fact label="Skills">{open.profile?.skills || '—'}</Fact>
                 <Fact label="Hobbies">{open.profile?.hobbies || '—'}</Fact>
+                <Fact label="Schools they’d like">
+                  {(Array.isArray(open.profile?.preferredSchools) ? open.profile!.preferredSchools : []).map((id) => schoolById.get(id)?.name).filter(Boolean).join(', ') ||
+                    open.profile?.preferredDistrict ||
+                    'Any'}
+                </Fact>
                 <Fact label="License (reported)">
                   {open.profile?.licenseNumber
                     ? `${open.profile.licenseType || 'License'} ${open.profile.licenseNumber}${open.profile.licenseState ? ` · ${open.profile.licenseState}` : ''}`

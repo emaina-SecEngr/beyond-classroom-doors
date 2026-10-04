@@ -31,6 +31,10 @@ export const sessionDetailsSchema: CollectionSchema = {
     { name: 'volunteerPhone', storage: 'text', interpretation: 'plain' },
     { name: 'teacherEmail', storage: 'text', interpretation: 'plain' },
     { name: 'teacherName', storage: 'text', interpretation: 'plain' },
+    // D17: the teacher's phone from their profile, copied at booking for the booked volunteer.
+    { name: 'teacherPhone', storage: 'text', interpretation: 'plain' },
+    // D18: the teacher's prep checklist for the volunteer's visit: [{ label, done }].
+    { name: 'prepChecklist', storage: 'text', interpretation: { kind: 'json' } },
     // D14: the booked volunteer's access needs for this visit (private row).
     { name: 'accessNeeds', storage: 'text', interpretation: 'plain' },
     // D13: the teacher confirms the class is ready; either side can propose a new date.

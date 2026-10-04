@@ -21,6 +21,8 @@ export interface ProfileRow {
   licenseType?: string
   licenseNumber?: string
   licenseState?: string
+  preferredDistrict?: string
+  preferredSchools?: string[]
 }
 
 export interface VolunteerStatusRow {

@@ -20,6 +20,8 @@ import {
   type Equipment,
   VETTING_HELP_DEFAULT_DAYS,
   VETTING_HELP_MAX_DAYS,
+  MAX_PENDING_INVITES_PER_SESSION,
+  MAX_PREP_ITEMS,
   TIME_BANDS,
   TOPICS,
   CHANGE_REQUEST_KINDS,
@@ -53,6 +55,7 @@ import {
   statusOf,
   str,
 } from './lib'
+import { MAX_PREFERRED_SCHOOLS, US_STATES } from '../lib/options'
 import { TEST_DISTRICT, TEST_MARK, TEST_SCHOOLS, TEST_SESSIONS, testSessionDate, testTeacherName } from './test-data'
 import { fetchUserFile, isFilePath, LICENSE_MAX_BYTES, LICENSE_MIMES, toBase64 } from '../server/user-files'
 
@@ -180,10 +183,16 @@ async function bookSession(tools: Parameters<ActionHandler>[0]['tools'], volunte
   })
   if (!claim.success) refuse('Sorry, someone just claimed this one.', 'already_claimed')
   await must(tools.update('session_requests', sessionId, { status: 'claimed' }), 'mark claimed')
+  // D18: the session is taken — settle any invitations for it.
+  const invites = await tools.query<{ volunteerId: string; status: string }>('session_invites', { where: { sessionId, status: 'pending' }, limit: 50 })
+  for (const inv of invites.success ? invites.data.records : []) {
+    await must(tools.update('session_invites', inv.recordId, { status: inv.data.volunteerId === volunteerId ? 'accepted' : 'closed' }), 'settle invite')
+  }
 
   const profile = await getData<Profile>(tools, 'profiles', volunteerId)
   const volunteerUser = await getData<{ email?: string }>(tools, 'users', volunteerId)
   const teacherUser = await getData<{ email?: string; name?: string }>(tools, 'users', session!.teacherId)
+  const teacherProfile = await getData<{ displayName?: string; phone?: string }>(tools, 'teacher_profiles', session!.teacherId)
   const volunteerName = profile ? `${profile.displayName}${profile.profession ? `, ${profile.profession}` : ''}` : ''
   if (details) {
     await must(
@@ -195,7 +204,8 @@ async function bookSession(tools: Parameters<ActionHandler>[0]['tools'], volunte
         volunteerPhone: profile?.phone ?? '',
         accessNeeds: profile?.accessNeeds ?? '',
         teacherEmail: teacherUser?.email ?? '',
-        teacherName: teacherUser?.name ?? '',
+        teacherName: teacherProfile?.displayName || teacherUser?.name || '',
+        teacherPhone: teacherProfile?.phone ?? '',
         equipmentRequested: [],
         equipmentReady: [],
         equipmentOther: '',
@@ -332,11 +342,21 @@ export const actions: Record<string, ActionHandler<Env>> = {
         licenseNumber: str(params, 'licenseNumber', { max: 40 }),
         licenseState: str(params, 'licenseState', { max: 2 }).toUpperCase(),
       }
-      if (extra.licenseState && !/^[A-Z]{2}$/.test(extra.licenseState)) refuse('License state must be a two-letter code, like CA.', 'invalid_input')
+      if (extra.licenseState && !(US_STATES as readonly string[]).includes(extra.licenseState)) refuse('Choose the license state from the list.', 'invalid_input')
+      // D17: preferred district and schools — only real, active schools.
+      const preferredDistrict = str(params, 'preferredDistrict', { max: 80 })
+      const rawSchools = params.preferredSchools === undefined || params.preferredSchools === null ? [] : params.preferredSchools
+      if (!Array.isArray(rawSchools) || rawSchools.some((x) => typeof x !== 'string' || x.length > 100)) refuse('Preferred schools must be a list.', 'invalid_input')
+      const preferredSchools = [...new Set(rawSchools as string[])]
+      if (preferredSchools.length > MAX_PREFERRED_SCHOOLS) refuse(`Choose up to ${MAX_PREFERRED_SCHOOLS} schools.`, 'invalid_input')
+      for (const id of preferredSchools) {
+        const sc = await getData<School>(tools, 'schools', id)
+        if (!sc || !sc.active) refuse('One of the chosen schools isn’t taking volunteers. Please choose again.', 'invalid_input')
+      }
       if (extra.phone && !/^[0-9+()\-.\s]{7,20}$/.test(extra.phone)) refuse('Phone number can use digits, spaces and + ( ) - only.', 'invalid_input')
 
       const before = await getData<Profile>(tools, 'profiles', userId)
-      await must(tools.create('profiles', { userId, displayName, profession, employer, ...extra }, userId), 'save profile')
+      await must(tools.create('profiles', { userId, displayName, profession, employer, ...extra, preferredDistrict, preferredSchools }, userId), 'save profile')
 
       const status = await statusOf(tools, userId)
       if (!status) {
@@ -367,6 +387,140 @@ export const actions: Record<string, ActionHandler<Env>> = {
         return ok({ status: 'applied', reset: true })
       }
       return ok({ status: status.status })
+    }),
+
+  // ── D18 · Teacher: approved volunteers, invitations, prep checklist ────────
+  /**
+   * Approved volunteers with a current clearance, for teachers. Work profile only:
+   * no email, phone, access needs or license — those reach a teacher only through a
+   * booking with her (D13/D14).
+   */
+  teacherVolunteerDirectory: ({ userId, tools }) =>
+    run('teacherVolunteerDirectory', async () => {
+      await requireAppRole(tools, userId, 'teacher')
+      const assignment = await getData<{ schoolId?: string }>(tools, 'role_assignments', userId)
+      const mySchool = assignment?.schoolId ?? ''
+      const statuses = await tools.query<{ userId: string; clearanceExpiresAt?: number | null }>('volunteer_status', { where: { status: 'approved' }, limit: 500 })
+      const now = nowSeconds()
+      const out: Record<string, unknown>[] = []
+      for (const r of statuses.success ? statuses.data.records : []) {
+        if (!((r.data.clearanceExpiresAt ?? 0) > now)) continue
+        const p = await getData<Profile & { skills?: string; yearsExperience?: number | null; hobbies?: string; preferredSchools?: string[] }>(tools, 'profiles', r.data.userId)
+        if (!p) continue
+        out.push({
+          volunteerId: r.data.userId,
+          displayName: p.displayName,
+          profession: p.profession,
+          employer: p.employer ?? '',
+          yearsExperience: p.yearsExperience ?? null,
+          skills: p.skills ?? '',
+          hobbies: p.hobbies ?? '',
+          prefersMySchool: !!mySchool && Array.isArray(p.preferredSchools) && p.preferredSchools.includes(mySchool),
+        })
+      }
+      out.sort((a, b) => Number(b.prefersMySchool) - Number(a.prefersMySchool) || String(a.displayName).localeCompare(String(b.displayName)))
+      return ok({ volunteers: out })
+    }),
+
+  inviteVolunteer: ({ userId, params, tools }) =>
+    run('inviteVolunteer', async () => {
+      await requireAppRole(tools, userId, 'teacher')
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const volunteerId = str(params, 'volunteerId', { required: true, max: 100 })
+      const note = str(params, 'note', { max: 300 })
+      const shareEmail = bool(params, 'shareEmail')
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session || session.teacherId !== userId) refuse('You can invite volunteers only to your own sessions.', 'forbidden')
+      if (session!.status !== 'open') refuse('This session is already booked or closed.', 'stale_state')
+      const details = await getData<SessionDetails>(tools, 'session_details', sessionId)
+      if (sessionStartSeconds(session!.sessionDate, session!.timeBand, details?.startTime) <= nowSeconds()) refuse('This session has already started.', 'in_past')
+      const vs = await statusOf(tools, volunteerId)
+      if (vs?.status !== 'approved' || !((vs.clearanceExpiresAt ?? 0) > nowSeconds())) refuse('You can invite only approved volunteers with a current clearance.', 'not_approved')
+
+      const prior = await tools.query<{ status: string }>('session_invites', { where: { sessionId, volunteerId }, limit: 1 })
+      const existing = prior.success ? prior.data.records[0] : undefined
+      if (existing?.data.status === 'pending') refuse('You’ve already invited them to this session.', 'duplicate')
+      if (existing?.data.status === 'declined') refuse('They declined this session. Try another date.', 'stale_state')
+      const pending = await tools.query('session_invites', { where: { sessionId, status: 'pending' }, limit: MAX_PENDING_INVITES_PER_SESSION + 1 })
+      if (pending.success && pending.data.records.length >= MAX_PENDING_INVITES_PER_SESSION) refuse(`Up to ${MAX_PENDING_INVITES_PER_SESSION} open invitations per session.`, 'invalid_input')
+
+      const me = await getData<{ email?: string; name?: string }>(tools, 'users', userId)
+      const tp = await getData<{ displayName?: string }>(tools, 'teacher_profiles', userId)
+      const teacherName = tp?.displayName || me?.name || 'A teacher'
+      const created = await must(
+        tools.create('session_invites', { sessionId, teacherId: userId, volunteerId, teacherName, note, replyEmail: shareEmail ? (me?.email ?? '') : '', status: 'pending', collaborators: [userId] }),
+        'create invite',
+      )
+      const school = session!.schoolId ? await getData<School>(tools, 'schools', session!.schoolId as string) : null
+      await audit(tools, { actorId: userId, action: 'invite_volunteer', targetType: 'session', targetId: sessionId, toState: `invited ${volunteerId}` })
+      await notify(tools, {
+        recipientId: volunteerId,
+        kind: 'session_invite',
+        title: `${teacherName} invited you to a session`,
+        // Never contact details in a notification: the reply email (if shared) is on the invitation in My sessions.
+        body: `Grade ${session!.grade} · ${topicLabel(session!)}${school ? ` at ${school.name}` : ''} · ${formatDate(session!.sessionDate)}, ${details?.startTime || session!.timeBand}. Open My sessions to claim or decline.`,
+      })
+      return ok({ inviteId: created.recordId })
+    }),
+
+  respondToInvite: ({ userId, params, tools }) =>
+    run('respondToInvite', async () => {
+      const inviteId = str(params, 'inviteId', { required: true, max: 100 })
+      const inv = await getData<{ volunteerId: string; teacherId: string; sessionId: string; status: string }>(tools, 'session_invites', inviteId)
+      if (!inv || inv.volunteerId !== userId) refuse('Invitation not found.', 'not_found')
+      if (inv!.status !== 'pending') refuse(`This invitation is already ${inv!.status}.`, 'stale_state')
+      await must(tools.update('session_invites', inviteId, { status: 'declined' }), 'decline invite')
+      const profile = await getData<Profile>(tools, 'profiles', userId)
+      const session = await getData<SessionRequest>(tools, 'session_requests', inv!.sessionId)
+      await audit(tools, { actorId: userId, action: 'decline_invite', targetType: 'session', targetId: inv!.sessionId, fromState: 'pending', toState: 'declined' })
+      await notify(tools, {
+        recipientId: inv!.teacherId,
+        kind: 'session_invite',
+        title: `${profile?.displayName ?? 'A volunteer'} can’t make it`,
+        body: session ? `Grade ${session.grade} · ${topicLabel(session)} · ${formatDate(session.sessionDate)}. It’s still open for other volunteers.` : '',
+      })
+      return ok({ inviteId })
+    }),
+
+  updatePrepChecklist: ({ userId, params, tools, env }) =>
+    run('updatePrepChecklist', async () => {
+      const sessionId = str(params, 'sessionId', { required: true, max: 100 })
+      const session = await getData<SessionRequest>(tools, 'session_requests', sessionId)
+      if (!session) refuse('Session not found.', 'not_found')
+      await requireSessionEditor(tools, userId, env.OWNER_USER_ID, session!)
+      if (session!.status === 'cancelled' || session!.status === 'completed') refuse(`This session is ${session!.status}.`, 'stale_state')
+      const raw = params.items
+      if (!Array.isArray(raw) || raw.length > MAX_PREP_ITEMS) refuse(`Up to ${MAX_PREP_ITEMS} checklist items.`, 'invalid_input')
+      const items: { label: string; done: boolean }[] = []
+      const seen = new Set<string>()
+      for (const it of raw as unknown[]) {
+        const o = (it ?? {}) as { label?: unknown; done?: unknown }
+        const label = typeof o.label === 'string' ? o.label.trim() : ''
+        if (!label || label.length > 80) refuse('Each checklist item needs a short label (up to 80 characters).', 'invalid_input')
+        if (seen.has(label.toLowerCase())) continue
+        seen.add(label.toLowerCase())
+        items.push({ label, done: o.done === true })
+      }
+      await must(tools.update('session_details', sessionId, { prepChecklist: items }), 'save checklist')
+      const done = items.filter((i) => i.done).length
+      await audit(tools, { actorId: userId, action: 'update_prep_checklist', targetType: 'session', targetId: sessionId, toState: `${done}/${items.length} done` })
+      return ok({ done, total: items.length })
+    }),
+
+  // ── D17 · Teacher profile (name, subject, grades, phone) ───────────────────
+  saveTeacherProfile: ({ userId, params, tools }) =>
+    run('saveTeacherProfile', async () => {
+      await requireAppRole(tools, userId, 'teacher')
+      const displayName = str(params, 'displayName', { required: true, max: 80 })
+      const subject = str(params, 'subject', { max: 60 })
+      const phone = str(params, 'phone', { max: 20 })
+      if (phone && !/^[0-9+()\-.\s]{7,20}$/.test(phone)) refuse('Phone number can use digits, spaces and + ( ) - only.', 'invalid_input')
+      const raw = params.grades === undefined || params.grades === null ? [] : params.grades
+      if (!Array.isArray(raw) || raw.some((g) => !(GRADES as readonly unknown[]).includes(g))) refuse('Grades must be 9 to 12.', 'invalid_input')
+      const grades = GRADES.filter((g) => (raw as string[]).includes(g))
+      await must(tools.create('teacher_profiles', { userId, displayName, subject, grades, phone }, userId), 'save teacher profile')
+      await audit(tools, { actorId: userId, action: 'save_teacher_profile', targetType: 'user', targetId: userId, toState: subject || 'saved' })
+      return ok({ userId })
     }),
 
   // ── D16 · Test data for manual testing: San Diego Unified schools ─────────

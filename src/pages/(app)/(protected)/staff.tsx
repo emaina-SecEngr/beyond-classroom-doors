@@ -435,7 +435,7 @@ function Sessions({ nameOf, scope, viewerId, isAdmin }: { nameOf: (id: string) =
                   >
                     Details
                   </Button>
-                  {isAdmin && r.data.status === 'open' && <AssignVolunteerButton sessionId={r.recordId} label={`${label}, ${formatSessionDate(r.data.sessionDate)}`} />}
+                  {isAdmin && r.data.status === 'open' && <AssignVolunteerButton sessionId={r.recordId} schoolId={r.data.schoolId} label={`${label}, ${formatSessionDate(r.data.sessionDate)}`} />}
                 </div>
               </div>
               <div className="mt-3 flex">

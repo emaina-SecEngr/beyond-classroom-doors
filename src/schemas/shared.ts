@@ -45,7 +45,13 @@ export const NOTIFICATION_KINDS = [
   'session_cancelled',
   'change_requested',
   'status_changed',
+  'session_invite',
 ] as const
+
+/** D18: a teacher's invitation to an approved volunteer for one of her open sessions. */
+export const SESSION_INVITE_STATUSES = ['pending', 'accepted', 'declined', 'closed'] as const
+export const MAX_PENDING_INVITES_PER_SESSION = 5
+export const MAX_PREP_ITEMS = 15
 
 export const CHANGE_REQUEST_KINDS = ['cancel', 'reschedule'] as const
 export const CHANGE_REQUEST_STATUSES = ['open', 'resolved'] as const
