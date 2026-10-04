@@ -12,8 +12,13 @@ export const PROGRAM_EMAIL = 'mainin2003@yahoo.com'
 const NAV = [
   { to: '/#how', label: 'How it works' },
   { to: '/volunteer', label: 'Volunteer' },
+  // D19: sign-in doors for the other roles. Same sign-in; the server decides the role.
+  { to: '/home?as=teacher', label: 'Teacher' },
+  { to: '/home?as=staff', label: 'Program staff' },
+  { to: '/home?as=admin', label: 'Program admin' },
   { to: '/#support', label: 'Support' },
 ]
+const DOOR_LINKS = new Set(['/home?as=teacher', '/home?as=staff', '/home?as=admin'])
 
 export function PublicHeader({ current }: { current?: '/volunteer' }) {
   return (
@@ -24,7 +29,12 @@ export function PublicHeader({ current }: { current?: '/volunteer' }) {
         </Link>
         <nav aria-label="Main" className="ml-auto flex shrink-0 items-center gap-4 text-sm text-muted-foreground sm:gap-6">
           {NAV.map((n) => {
-            const className = cn('hover:text-foreground', n.to !== '/volunteer' && 'hidden sm:inline', current === n.to && 'font-semibold text-foreground')
+            // Phones keep Volunteer + Sign in; the role doors also live in the footer.
+            const className = cn(
+              'whitespace-nowrap hover:text-foreground',
+              n.to !== '/volunteer' && (DOOR_LINKS.has(n.to) ? 'hidden md:inline' : 'hidden lg:inline'),
+              current === n.to && 'font-semibold text-foreground',
+            )
             // Section anchors are plain links so the browser scrolls to them.
             return n.to.includes('#') ? (
               <a key={n.to} href={n.to} className={className}>
@@ -92,6 +102,11 @@ export function PublicFooter() {
               </Link>
             </li>
             <li>
+              <Link to="/home?as=admin" className="hover:text-foreground">
+                Program admin sign in
+              </Link>
+            </li>
+            <li>
               <a href={`mailto:${PROGRAM_EMAIL}`} className="hover:text-foreground">
                 Contact the program team
               </a>
@@ -111,6 +126,7 @@ export const SIGN_IN_AS = [
   { as: 'volunteer', label: 'volunteer' },
   { as: 'teacher', label: 'teacher' },
   { as: 'staff', label: 'program staff' },
+  { as: 'admin', label: 'program admin' },
 ] as const
 
 export function SignInLinks({ className }: { className?: string }) {

@@ -134,17 +134,19 @@ The schools and addresses are real public listings from the San Diego Unified di
 
 ## 7b · Sign-in links (signed out, then each account)
 1. Open the landing page signed out.
-   - ✅ Under the buttons: *Sign in as a volunteer, teacher or program staff*.
-   - ✅ The footer has three sign-in links.
-2. Click **teacher**.
+   - ✅ Top bar: *How it works · Volunteer · Teacher · Program staff · Program admin · Support · Sign in*.
+   - ✅ The footer has four sign-in links.
+2. Click **Teacher**.
    - ✅ Sign-in opens right away, with the note *Teachers: sign in with the school email…*.
 3. Sign in as **T1** → ✅ lands on **My volunteers**.
-4. Sign out, use **teacher**, sign in as **V1**.
+4. Sign out, use **Teacher**, sign in as **V1**.
    - ✅ *You're signed in as a volunteer. You don't have teacher access yet…*, with a **Go to My sessions** button.
    - ✅ Nav shows only the volunteer links.
-5. Use **program staff** as **V1**.
+5. Use **Program staff** as **V1**.
    - ✅ *This account isn't program staff…*; no Approvals in the nav.
-6. Use **program staff** as **A** → ✅ lands on **Approvals**.
+6. Use **Program admin** as **S** (staff).
+   - ✅ *This account isn't the program admin…*, with a button to the Program board.
+7. Use **Program admin** as **A** → ✅ lands on **Approvals**.
 
 ## 8 · Negative checks (should all fail politely)
 - **V2** opens `/approvals` or `/staff` directly → ✅ refused or empty, no data.

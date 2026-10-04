@@ -62,9 +62,6 @@ export default function VolunteerPage() {
               >
                 Apply to volunteer
               </Link>
-              <Link to="/home" className="inline-flex h-11 items-center rounded-md border border-input px-5 text-sm font-semibold hover:bg-accent">
-                See open sessions
-              </Link>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">You’ll sign in first. It’s free.</p>
           </section>

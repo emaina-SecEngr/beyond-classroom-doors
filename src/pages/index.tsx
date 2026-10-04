@@ -36,7 +36,7 @@
 
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { PublicFooter, PublicHeader, SignInLinks } from '../components/PublicChrome'
+import { PublicFooter, PublicHeader } from '../components/PublicChrome'
 import { Seo } from '../components/Seo'
 import { cn } from '../lib/utils'
 import { seo } from '../seo'
@@ -167,18 +167,6 @@ export default function Landing() {
                 Nurses, electricians and engineers visit a high school classroom for an hour. Every volunteer is checked and approved before
                 any visit.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Link
-                  to="/volunteer"
-                  className="inline-flex h-11 items-center rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-                >
-                  Volunteer your hour
-                </Link>
-                <Link to="/home" className="inline-flex h-11 items-center rounded-md border border-input px-5 text-sm font-semibold hover:bg-accent">
-                  See open sessions
-                </Link>
-              </div>
-              <SignInLinks className="mt-4 text-sm text-muted-foreground" />
             </div>
             <SessionBoard />
           </section>

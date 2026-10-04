@@ -19,7 +19,7 @@ import { BoardList, OpenSessions, type BoardItem } from '../../components/OpenSe
 import { callAction } from '../../lib/actions'
 import { formatSessionDate, todaySeconds, topicText, VOLUNTEER_STATUS_LABELS } from '../../lib/labels'
 import { useMe, type Me } from '../../lib/me'
-import { ADMIN_LANDED_KEY, useAccess } from '../../components/admin/shared'
+import { ADMIN_LANDED_KEY, markAdminLanded, useAccess } from '../../components/admin/shared'
 import { useSchools } from '../../lib/schools'
 import type { TimeBand } from '../../schemas/shared'
 
@@ -35,12 +35,13 @@ interface SessionRow {
   schoolId?: string
 }
 
-type Door = 'volunteer' | 'teacher' | 'staff'
-const DOORS: Door[] = ['volunteer', 'teacher', 'staff']
+type Door = 'volunteer' | 'teacher' | 'staff' | 'admin'
+const DOORS: Door[] = ['volunteer', 'teacher', 'staff', 'admin']
 const DOOR_HINT: Record<Door, string> = {
   volunteer: 'Volunteers: sign in, then fill in your profile to apply. New here? It takes two minutes.',
   teacher: 'Teachers: sign in with the school email the program invited.',
   staff: 'Program staff: sign in with the account the program admin gave access to.',
+  admin: 'Program admin: sign in with the nonprofit’s admin account.',
 }
 
 export default function HomePage() {
@@ -50,26 +51,44 @@ export default function HomePage() {
   const door = DOORS.includes(asParam as Door) ? (asParam as Door) : null
   if (!me.ready) return <Loading />
   if (!me.signedIn) return <SignedOutBoard door={door} />
-  // D19: the link someone used is only a hint. Where they go — and what they can do —
-  // comes from their real role. A "wrong door" gets a note, never extra access.
-  const actual: Door = me.isStaff ? 'staff' : me.appRole === 'teacher' ? 'teacher' : 'volunteer'
-  if (door && door !== actual) return <WrongDoor door={door} actual={actual} />
-  if (door === 'teacher') return <Navigate to="/my-volunteers" replace />
+  if (door) return <DoorLanding door={door} me={me} />
   // Volunteers don't use the Program board: their home is My sessions (D15).
-  if (actual === 'volunteer') return <Navigate to="/my-sessions" replace />
+  if (!me.isStaff && !me.appRole) return <Navigate to="/my-sessions" replace />
   return me.isStaff ? <StaffHome me={me} /> : <LiveBoard me={me} />
+}
+
+/**
+ * D19: the link someone used is only a hint. Where they go — and what they can do —
+ * comes from their real role (server-decided). A "wrong door" gets a note, never access.
+ */
+function DoorLanding({ door, me }: { door: Door; me: Me }) {
+  const access = useAccess(me.isStaff)
+  if (me.isStaff && access === null) return <Loading />
+  const actual: Door = me.isStaff ? (access?.nonprofitAdmin ? 'admin' : 'staff') : me.appRole === 'teacher' ? 'teacher' : 'volunteer'
+  // The program admin is also staff, so the staff door is fine for them.
+  const matches = door === actual || (door === 'staff' && actual === 'admin')
+  if (!matches) return <WrongDoor door={door} actual={actual} />
+  if (actual === 'admin') {
+    markAdminLanded()
+    return <Navigate to="/approvals" replace />
+  }
+  if (actual === 'teacher') return <Navigate to="/my-volunteers" replace />
+  if (actual === 'volunteer') return <Navigate to="/my-sessions" replace />
+  return <Navigate to="/home" replace />
 }
 
 const ACTUAL_HOME: Record<Door, { to: string; label: string; who: string }> = {
   volunteer: { to: '/my-sessions', label: 'Go to My sessions', who: 'a volunteer' },
   teacher: { to: '/my-volunteers', label: 'Go to My volunteers', who: 'a teacher' },
   staff: { to: '/home', label: 'Go to the Program board', who: 'program staff' },
+  admin: { to: '/approvals', label: 'Go to Approvals', who: 'the program admin' },
 }
 
 function WrongDoor({ door, actual }: { door: Door; actual: Door }) {
   const why: Record<Door, string> = {
     teacher: 'You don’t have teacher access yet. The program admin invites teachers by their school email; ask them to add you, then sign in with that email.',
     staff: 'This account isn’t program staff. Only the program admin can give staff access.',
+    admin: 'This account isn’t the program admin. Approvals and staff changes are for the nonprofit’s admin account only.',
     volunteer: 'This account has a teacher or staff role, so it isn’t set up for volunteering. Use a separate account to volunteer.',
   }
   const home = ACTUAL_HOME[actual]
